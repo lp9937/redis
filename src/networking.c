@@ -221,39 +221,64 @@ void clientInstallWriteHandler(client *c) {
 
 /* This function is called every time we are going to transmit new data
  * to the client. The behavior is the following:
+ * 
+ * 每次向客户端发送数据时都会被调用此函数，该函数的行为如下：
  *
  * If the client should receive new data (normal clients will) the function
  * returns C_OK, and make sure to install the write handler in our event
  * loop so that when the socket is writable new data gets written.
  *
+ * 如果客户端可以接收新数据(大多数情况都是这样的)，函数返回 C_OK
+ * 并且安装写处理器到事件循环中
+ * 这样当套接字可写时，新数据会被写入
+ * 
  * If the client should not receive new data, because it is a fake client
  * (used to load AOF in memory), a master or because the setup of the write
  * handler failed, the function returns C_ERR.
+ * 
+ * 对于不应该接收新数据的客户端，
+ * 比如伪客户端(被使用来加载AOF到内存)、master
+ * 或者写处理器安装失败时
+ * 函数返回C_ERR
  *
  * The function may return C_OK without actually installing the write
  * event handler in the following cases:
+ * 
+ * 在以下没有实际安装写事件处理器的情况下，该函数返回C_OK
  *
  * 1) The event handler should already be installed since the output buffer
  *    already contains something.
  * 2) The client is a slave but not yet online, so we want to just accumulate
  *    writes in the buffer but not actually sending them yet.
+ * 
+ * 1)在输出缓冲区包含有东西的情况下，写事件处理器已经被安装了
+ * 2)客户端是slave且没有在线，我们只是累计写入数据到缓冲区，但实际不发送它
  *
  * Typically gets called every time a reply is built, before adding more
  * data to the clients output buffers. If the function returns C_ERR no
- * data should be appended to the output buffers. */
+ * data should be appended to the output buffers.
+ * 
+ * 在向客户端输出缓冲区添加更多数据以前，该函数通常在每个回复被创建时调用。
+ * 如果函数返回C_ERR，那么没有数据被追加到输出缓冲区
+ *  */
 int prepareClientToWrite(client *c) {
     /* If it's the Lua client we always return ok without installing any
      * handler since there is no socket at all. */
+    //如果是Lua脚本环境使用的客户端，将总是返回C_OK，
+    //并且不用安装任何处理器，因为根本没有套接字
     if (c->flags & (CLIENT_LUA|CLIENT_MODULE)) return C_OK;
 
     /* If CLIENT_CLOSE_ASAP flag is set, we need not write anything. */
+    //如果客户端即将关闭，则不需要写任何内容
     if (c->flags & CLIENT_CLOSE_ASAP) return C_ERR;
 
     /* CLIENT REPLY OFF / SKIP handling: don't send replies. */
+    //如果客户端被设置成不回复或跳过该命令的回复，则不发送回复信息
     if (c->flags & (CLIENT_REPLY_OFF|CLIENT_REPLY_SKIP)) return C_ERR;
 
     /* Masters don't receive replies, unless CLIENT_MASTER_FORCE_REPLY flag
      * is set. */
+    //客户端是主服务器且CLIENT_MASTER_FORCE_REPLY标志没有被设置的情况下，它是不可写的
     if ((c->flags & CLIENT_MASTER) &&
         !(c->flags & CLIENT_MASTER_FORCE_REPLY)) return C_ERR;
 
@@ -266,6 +291,9 @@ int prepareClientToWrite(client *c) {
      * not install a write handler. Instead, it will be done by
      * handleClientsWithPendingReadsUsingThreads() upon return.
      */
+    //除非已经安排了客户端将输出缓冲区写到套接字，否则安排客户端将输出缓冲区写到套接字
+    //如果CLIENT_PENDING_READ标志被设置，在IO线程内，不应该安装写处理器
+    //相反它将由handleClientsWithPendingReadsUsingThreads完成
     if (!clientHasPendingReplies(c) && !(c->flags & CLIENT_PENDING_READ))
             clientInstallWriteHandler(c);
 
@@ -341,7 +369,9 @@ void _addReplyProtoToList(client *c, const char *s, size_t len) {
  * -------------------------------------------------------------------------- */
 
 /* Add the object 'obj' string representation to the client output buffer. */
+//输出'obj'到客户端缓冲区
 void addReply(client *c, robj *obj) {
+    //为客户端安装写处理器到事件循环
     if (prepareClientToWrite(c) != C_OK) return;
 
     if (sdsEncodedObject(obj)) {
@@ -692,9 +722,11 @@ void addReplyLongLongWithPrefix(client *c, long long ll, char prefix) {
      * so we have a few shared objects to use if the integer is small
      * like it is most of the times. */
     if (prefix == '*' && ll < OBJ_SHARED_BULKHDR_LEN && ll >= 0) {
+        //多条批量回复
         addReply(c,shared.mbulkhdr[ll]);
         return;
     } else if (prefix == '$' && ll < OBJ_SHARED_BULKHDR_LEN && ll >= 0) {
+        //批量回复
         addReply(c,shared.bulkhdr[ll]);
         return;
     }
@@ -705,7 +737,10 @@ void addReplyLongLongWithPrefix(client *c, long long ll, char prefix) {
     buf[len+2] = '\n';
     addReplyProto(c,buf,len+3);
 }
-
+/*
+*返回一个整数
+*
+*/
 void addReplyLongLong(client *c, long long ll) {
     if (ll == 0)
         addReply(c,shared.czero);

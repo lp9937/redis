@@ -277,13 +277,17 @@ robj *createModuleObject(moduleType *mt, void *value) {
     mv->value = value;
     return createObject(OBJ_MODULE,mv);
 }
-
+/**
+ * 释放字符串对象
+ * */
 void freeStringObject(robj *o) {
     if (o->encoding == OBJ_ENCODING_RAW) {
         sdsfree(o->ptr);
     }
 }
-
+/**
+ * 释放列表对象
+ * */
 void freeListObject(robj *o) {
     if (o->encoding == OBJ_ENCODING_QUICKLIST) {
         quicklistRelease(o->ptr);
@@ -345,19 +349,26 @@ void freeModuleObject(robj *o) {
 void freeStreamObject(robj *o) {
     freeStream(o->ptr);
 }
-
+/**
+ * 为对象的引用计数增1
+ * */
 void incrRefCount(robj *o) {
     if (o->refcount < OBJ_FIRST_SPECIAL_REFCOUNT) {
         o->refcount++;
     } else {
         if (o->refcount == OBJ_SHARED_REFCOUNT) {
+            //无需执行任何操作，此时refcount是不可改变的
             /* Nothing to do: this refcount is immutable. */
         } else if (o->refcount == OBJ_STATIC_REFCOUNT) {
             serverPanic("You tried to retain an object allocated in the stack");
         }
     }
 }
-
+/**
+ * 为对象的引用计数减一
+ * 
+ * 当对象的引用计数降为0时，释放对象
+ * */
 void decrRefCount(robj *o) {
     if (o->refcount == 1) {
         switch(o->type) {
@@ -373,7 +384,10 @@ void decrRefCount(robj *o) {
         zfree(o);
     } else {
         if (o->refcount <= 0) serverPanic("decrRefCount against refcount <= 0");
-        if (o->refcount != OBJ_SHARED_REFCOUNT) o->refcount--;
+        
+        if (o->refcount != OBJ_SHARED_REFCOUNT)
+            //引用计数减一
+            o->refcount--;
     }
 }
 

@@ -45,6 +45,7 @@ typedef char *sds;
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
 struct __attribute__ ((__packed__)) sdshdr5 {
+    //低三位表类型，高五位表长度
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
     char buf[];
 };
@@ -100,7 +101,9 @@ static inline size_t sdslen(const sds s) {
     }
     return 0;
 }
-
+/**
+ * 计算SDS剩余空间
+ * */
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -183,7 +186,7 @@ static inline size_t sdsalloc(const sds s) {
         case SDS_TYPE_5:
             return SDS_TYPE_5_LEN(flags);
         case SDS_TYPE_8:
-            return SDS_HDR(8,s)->alloc;
+            return SDS_HDR(8,s)->kon;
         case SDS_TYPE_16:
             return SDS_HDR(16,s)->alloc;
         case SDS_TYPE_32:

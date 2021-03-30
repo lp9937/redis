@@ -39,6 +39,9 @@
  * listSetFreeMethod.
  *
  * On error, NULL is returned. Otherwise the pointer to the new list. */
+/**
+ * 创建空链表
+ * */
 list *listCreate(void)
 {
     struct list *list;
@@ -54,6 +57,9 @@ list *listCreate(void)
 }
 
 /* Remove all the elements from the list without destroying the list itself. */
+/**
+ * 移除链表中所节点，并释放所有节点值占用的内存
+ * */
 void listEmpty(list *list)
 {
     unsigned long len;
@@ -74,6 +80,9 @@ void listEmpty(list *list)
 /* Free the whole list.
  *
  * This function can't fail. */
+/**
+ * 释放整个链表空间
+ * */
 void listRelease(list *list)
 {
     listEmpty(list);
@@ -86,6 +95,9 @@ void listRelease(list *list)
  * On error, NULL is returned and no operation is performed (i.e. the
  * list remains unaltered).
  * On success the 'list' pointer you pass to the function is returned. */
+/**
+ * 向链表头插入元素
+ * */
 list *listAddNodeHead(list *list, void *value)
 {
     listNode *node;
@@ -112,6 +124,9 @@ list *listAddNodeHead(list *list, void *value)
  * On error, NULL is returned and no operation is performed (i.e. the
  * list remains unaltered).
  * On success the 'list' pointer you pass to the function is returned. */
+/**
+ * 向链表尾插入元素
+ * */
 list *listAddNodeTail(list *list, void *value)
 {
     listNode *node;
@@ -131,7 +146,9 @@ list *listAddNodeTail(list *list, void *value)
     list->len++;
     return list;
 }
-
+/**
+ * 在指定节点前或后插入元素
+ * */
 list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
     listNode *node;
 
@@ -165,6 +182,9 @@ list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
  * It's up to the caller to free the private value of the node.
  *
  * This function can't fail. */
+/**
+ * 从链表中移除指定节点
+ * */
 void listDelNode(list *list, listNode *node)
 {
     if (node->prev)
@@ -184,6 +204,9 @@ void listDelNode(list *list, listNode *node)
  * call to listNext() will return the next element of the list.
  *
  * This function can't fail. */
+/**
+ * 获取链表迭代器
+ * */
 listIter *listGetIterator(list *list, int direction)
 {
     listIter *iter;
@@ -198,6 +221,9 @@ listIter *listGetIterator(list *list, int direction)
 }
 
 /* Release the iterator memory */
+/**
+ * 释放迭代器
+ * */
 void listReleaseIterator(listIter *iter) {
     zfree(iter);
 }
@@ -227,6 +253,9 @@ void listRewindTail(list *list, listIter *li) {
  * }
  *
  * */
+/**
+ * 返回迭代器的下一个元素
+ * */
 listNode *listNext(listIter *iter)
 {
     listNode *current = iter->next;
@@ -248,6 +277,9 @@ listNode *listNext(listIter *iter)
  * the original node is used as value of the copied node.
  *
  * The original list both on success or error is never modified. */
+/**
+ * 复制链表
+ * */
 list *listDup(list *orig)
 {
     list *copy;
@@ -288,6 +320,9 @@ list *listDup(list *orig)
  * On success the first matching node pointer is returned
  * (search starts from head). If no matching node exists
  * NULL is returned. */
+/**
+ * 查找节点
+ * */
 listNode *listSearchKey(list *list, void *key)
 {
     listIter iter;
@@ -313,6 +348,9 @@ listNode *listSearchKey(list *list, void *key)
  * and so on. Negative integers are used in order to count
  * from the tail, -1 is the last element, -2 the penultimate
  * and so on. If the index is out of range NULL is returned. */
+/**
+ * 返回指定索引位置的节点
+ * */
 listNode *listIndex(list *list, long index) {
     listNode *n;
 
@@ -328,6 +366,9 @@ listNode *listIndex(list *list, long index) {
 }
 
 /* Rotate the list removing the tail node and inserting it to the head. */
+/**
+ * 将末节点移到表头
+ * /
 void listRotateTailToHead(list *list) {
     if (listLength(list) <= 1) return;
 
@@ -343,6 +384,9 @@ void listRotateTailToHead(list *list) {
 }
 
 /* Rotate the list removing the head node and inserting it to the tail. */
+/**
+ * 将表头移到尾节点
+ * */
 void listRotateHeadToTail(list *list) {
     if (listLength(list) <= 1) return;
 
@@ -359,6 +403,9 @@ void listRotateHeadToTail(list *list) {
 
 /* Add all the elements of the list 'o' at the end of the
  * list 'l'. The list 'other' remains empty but otherwise valid. */
+/**
+ * 拼接两个链表
+ * */
 void listJoin(list *l, list *o) {
     if (o->len == 0) return;
 

@@ -665,12 +665,17 @@ typedef struct RedisModuleDigest {
 #define OBJ_STATIC_REFCOUNT (INT_MAX-1) /* Object allocated in the stack. */
 #define OBJ_FIRST_SPECIAL_REFCOUNT OBJ_STATIC_REFCOUNT
 typedef struct redisObject {
+    //类型
     unsigned type:4;
+    //编码
     unsigned encoding:4;
+    //对象最后一次被访问的时间
     unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
                             * LFU data (least significant 8 bits frequency
                             * and most significant 16 bits access time). */
+    //引用计数
     int refcount;
+    //指向实际值的指针
     void *ptr;
 } robj;
 
@@ -703,14 +708,22 @@ typedef struct clientReplyBlock {
  * by integers from 0 (the default database) up to the max configured
  * database. The database number is the 'id' field in the structure. */
 typedef struct redisDb {
+    //数据库键空间，保存所有键-值对
     dict *dict;                 /* The keyspace for this DB */
+    //存放设置了过期时间的键和过期时间 UNIX 时间戳
     dict *expires;              /* Timeout of keys with a timeout set */
+    //正处于阻塞状态的键
     dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
+    //可以解除阻塞的键
     dict *ready_keys;           /* Blocked keys that received a PUSH */
+    //正在被 WATCH 命令监视的键
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
+    //数据库ID
     int id;                     /* Database ID */
+    //数据库的键的平均生存时间(TTL)
     long long avg_ttl;          /* Average TTL, just for stats */
     unsigned long expires_cursor; /* Cursor of the active expire cycle. */
+    //需要碎片整理的键名列表
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
 } redisDb;
 
@@ -853,74 +866,134 @@ typedef struct {
                                       -2, ... and so forth. */
 
 typedef struct client {
+    //客户端唯一id，递增的
     uint64_t id;            /* Client incremental unique ID. */
+
     connection *conn;
+    //RESP协议版本
     int resp;               /* RESP protocol version. Can be 2 or 3. */
+    //当前正在使用的数据库
     redisDb *db;            /* Pointer to currently SELECTed DB. */
+    //客户端名字
     robj *name;             /* As set by CLIENT SETNAME. */
+    //查询缓冲区
     sds querybuf;           /* Buffer we use to accumulate client queries. */
+    //查询缓存区的读取位置
     size_t qb_pos;          /* The position we have read in querybuf. */
     sds pending_querybuf;   /* If this client is flagged as master, this buffer
                                represents the yet not applied portion of the
                                replication stream that we are receiving from
                                the master. */
+    //查询缓冲区长度峰值
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size. */
+    //参数数量
     int argc;               /* Num of arguments of current command. */
+    //参数对象数组
     robj **argv;            /* Arguments of current command. */
+    //如果参数被重写，原命令参数个数
     int original_argc;      /* Num of arguments of original command if arguments were rewritten. */
+    //原命令参数对象数组
     robj **original_argv;   /* Arguments of original command if arguments were rewritten. */
+    //参数对象数组中，所有参数对象长度的总和
     size_t argv_len_sum;    /* Sum of lengths of objects in argv list. */
+    //纪录被客户端执行的命令
     struct redisCommand *cmd, *lastcmd;  /* Last command executed. */
+    //连接关联的用户
     user *user;             /* User associated with this connection. If the
                                user is set to NULL the connection can do
                                anything (admin). */
+    //请求的类型：内联命令还是多条命令
     int reqtype;            /* Request protocol type: PROTO_REQ_* */
+    //剩余未读取的命令内容数量
     int multibulklen;       /* Number of multi bulk arguments left to read. */
+    //命令内容的长度
     long bulklen;           /* Length of bulk argument in multi bulk request. */
+    //回复列表
     list *reply;            /* List of reply objects to send to the client. */
+    //回复列表中所有对象的中字节数
     unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
+    //已发送的字节数
     size_t sentlen;         /* Amount of bytes already sent in the current
-                               buffer or object being sent. */
+                               buffer or object being sent. */、
+    //客户端创建时间
     time_t ctime;           /* Client creation time. */
+    //当前命令持续时间
     long duration;          /* Current command duration. Used for measuring latency of blocking/non-blocking cmds */
+    //客户端和服务器最后一次互动的时间
     time_t lastinteraction; /* Time of the last interaction, used for timeout */
+    //客户端的输出缓冲区超过软性限制的时间
     time_t obuf_soft_limit_reached_time;
+    //客户端状态标志
     uint64_t flags;         /* Client flags: CLIENT_* macros. */
+    //当用户需要身份认证时，需要次字段
+    //代表认证的状态
+    //0 代表未认证， 1 代表已认证
     int authenticated;      /* Needed when the default user requires auth. */
+    //如果这是从机，代表复制状态
     int replstate;          /* Replication state if this is a slave. */
     int repl_put_online_on_ack; /* Install slave write handler on first ACK. */
+    //保存主服务器传过来的RDB文件的描述符
     int repldbfd;           /* Replication DB file descriptor. */
+    //读取主服务器传来的 RDB 文件的偏移量
     off_t repldboff;        /* Replication DB file offset. */
+    //RDB文件大小
     off_t repldbsize;       /* Replication DB file size. */
+    //RDB文件前导码
     sds replpreamble;       /* Replication DB preamble. */
+    //主服务器读复制偏移量
     long long read_reploff; /* Read replication offset if this is a master. */
+
+    //主服务器的复制偏移量
     long long reploff;      /* Applied replication offset if this is a master. */
+    //从服务器最后一次发送 REPLCONF ACK 时的偏移量
     long long repl_ack_off; /* Replication ack offset, if this is a slave. */
+    //从服务器最后一次发送 REPLCONF ACK 的时间
     long long repl_ack_time;/* Replication ack time, if this is a slave. */
+    //
     long long psync_initial_offset; /* FULLRESYNC reply offset other slaves
                                        copying this slave output buffer
                                        should use. */
+    //主服务器的复制Id                                  
     char replid[CONFIG_RUN_ID_SIZE+1]; /* Master replication ID (if master). */
+    //从服务器的监听端口
     int slave_listening_port; /* As configured with: REPLCONF listening-port */
+    //从服务器地址
     char *slave_addr;       /* Optionally given by REPLCONF ip-address */
+    //从服务器容量
     int slave_capa;         /* Slave capabilities: SLAVE_CAPA_* bitwise OR. */
+    //事务状态
     multiState mstate;      /* MULTI/EXEC state */
+    //阻塞类型
     int btype;              /* Type of blocking op if CLIENT_BLOCKED. */
+    //阻塞状态
     blockingState bpop;     /* blocking state */
+    //最后被写入的全局复制偏移量
     long long woff;         /* Last write global replication offset. */
+    //被监视的键
     list *watched_keys;     /* Keys WATCHED for MULTI/EXEC CAS */
+    //字典记录了客户端所有订阅的频道
+    //键位频道名字，值为null
+    //既是一个频道的集合
     dict *pubsub_channels;  /* channels a client is interested in (SUBSCRIBE) */
+    //链表，包含多个pubsubPattern结构
+    //记录了所有订阅频道的客户端信息
+    //新pubsubPattern 结构总是被添加到表尾
     list *pubsub_patterns;  /* patterns a client is interested in (SUBSCRIBE) */
     sds peerid;             /* Cached peer ID. */
     sds sockname;           /* Cached connection target address. */
+    //
     listNode *client_list_node; /* list node in client list */
+    //
     listNode *paused_list_node; /* list node within the pause list */
+    //当经过身份验证的用户更改时，执行回掉
     RedisModuleUserChangedFunc auth_callback; /* Module callback to execute
                                                * when the authenticated user
                                                * changes. */
+    //
     void *auth_callback_privdata; /* Private data that is passed when the auth
                                    * changed callback is executed. Opaque for
                                    * Redis Core. */
+    //                              
     void *auth_module;      /* The module that owns the callback, which is used
                              * to disconnect the client if the module is
                              * unloaded for cleanup. Opaque for Redis Core.*/
@@ -940,7 +1013,9 @@ typedef struct client {
     uint64_t client_cron_last_memory_usage;
     int      client_cron_last_memory_type;
     /* Response buffer */
+    //回复偏移量
     int bufpos;
+    //回复缓冲区
     char buf[PROTO_REPLY_CHUNK_BYTES];
 } client;
 
@@ -1157,22 +1232,37 @@ typedef enum childInfoType {
 
 struct redisServer {
     /* General */
+    //进程Id
     pid_t pid;                  /* Main process pid. */
+    //线程Id
     pthread_t main_thread_id;         /* Main thread id */
+    //配置文件绝对路径
     char *configfile;           /* Absolute config file path, or NULL */
+    //可执行文件绝对路径
     char *executable;           /* Absolute executable file path. */
+    //可执行文件参数
     char **exec_argv;           /* Executable argv vector (copy). */
+    //动态hz，依据客户端数量改变hz的值
     int dynamic_hz;             /* Change hz value depending on # of clients. */
+    //serverCron()每秒调用的次数
     int config_hz;              /* Configured HZ value. May be different than
                                    the actual 'hz' field value if dynamic-hz
                                    is enabled. */
+    //进程的umask
     mode_t umask;               /* The umask value of the process on startup */
+    //serverCron()每秒调用的次数
     int hz;                     /* serverCron() calls frequency in hertz */
+    //
     int in_fork_child;          /* indication that this is a fork child */
+    //数据库
     redisDb *db;
+    //命令表
     dict *commands;             /* Command table */
+    //命令表(命令重命名以前的命令表)
     dict *orig_commands;        /* Command table before command renaming. */
+    //事件状态
     aeEventLoop *el;
+    //
     rax *errors;                /* Errors table */
     redisAtomic unsigned int lruclock; /* Clock for LRU eviction */
     volatile sig_atomic_t shutdown_asap; /* SHUTDOWN needed ASAP */
@@ -1320,6 +1410,7 @@ struct redisServer {
     int active_defrag_cycle_max;       /* maximal effort for defrag in CPU percentage */
     unsigned long active_defrag_max_scan_fields; /* maximum number of fields of set/hash/zset/list to process from within the main dict scan */
     size_t client_max_querybuf_len; /* Limit for client query buffer length */
+    //数据库的数量，默认值是16
     int dbnum;                      /* Total number of configured DBs */
     int supervised;                 /* 1 if supervised, 0 otherwise. */
     int supervised_mode;            /* See SUPERVISED_* */

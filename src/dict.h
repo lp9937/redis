@@ -46,7 +46,9 @@
 
 /* Unused arguments generate annoying warnings... */
 #define DICT_NOTUSED(V) ((void) V)
-
+/**
+ * 哈希表节点
+ * */
 typedef struct dictEntry {
     void *key;
     union {
@@ -70,18 +72,32 @@ typedef struct dictType {
 
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
+/**
+ * 哈希表结构
+ * */
 typedef struct dictht {
+    //哈希表节点数组
     dictEntry **table;
+    //哈希表大小
     unsigned long size;
+    //哈希表大小掩码，用于计算索引值，总是等于size-1
     unsigned long sizemask;
+    //哈希表已有节点的数量
     unsigned long used;
 } dictht;
-
+/**
+ * 字典
+ * */
 typedef struct dict {
+    //类型特定函数
     dictType *type;
+    //私有数据
     void *privdata;
+    //哈希表数组
     dictht ht[2];
+    //rehash索引，当rehash不在进行时，值为-1
     long rehashidx; /* rehashing not in progress if rehashidx == -1 */
+    //如果pauserehash大于0，rehash被暂停
     int16_t pauserehash; /* If >0 rehashing is paused (<0 indicates coding error) */
 } dict;
 

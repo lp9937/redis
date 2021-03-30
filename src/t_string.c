@@ -256,6 +256,7 @@ int parseExtendedStringArgumentsOrReply(client *c, int *flags, int *unit, robj *
  *     [EXAT <seconds-timestamp>][PXAT <milliseconds-timestamp>] */
 void setCommand(client *c) {
     robj *expire = NULL;
+    //单位秒
     int unit = UNIT_SECONDS;
     int flags = OBJ_NO_FLAGS;
 

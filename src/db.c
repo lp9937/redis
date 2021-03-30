@@ -164,7 +164,13 @@ robj *lookupKeyWriteWithFlags(redisDb *db, robj *key, int flags) {
 robj *lookupKeyWrite(redisDb *db, robj *key) {
     return lookupKeyWriteWithFlags(db, key, LOOKUP_NONE);
 }
-
+/*
+*从数据库中查找key对应的值
+*
+*如果key存在，返回key对应的值对象
+*
+*如果key不存在，向客户端发送reply参数中的信息，并返回NULL
+*/
 robj *lookupKeyReadOrReply(client *c, robj *key, robj *reply) {
     robj *o = lookupKeyRead(c->db, key);
     if (!o) addReply(c,reply);

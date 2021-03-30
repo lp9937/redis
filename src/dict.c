@@ -99,6 +99,9 @@ uint64_t dictGenCaseHashFunction(const unsigned char *buf, int len) {
 
 /* Reset a hash table already initialized with ht_init().
  * NOTE: This function should only be called by ht_destroy(). */
+/**
+ * 重置哈希表
+ * */
 static void _dictReset(dictht *ht)
 {
     ht->table = NULL;
@@ -108,6 +111,9 @@ static void _dictReset(dictht *ht)
 }
 
 /* Create a new hash table */
+/**
+ * 创建字典
+ * */
 dict *dictCreate(dictType *type,
         void *privDataPtr)
 {
@@ -118,6 +124,9 @@ dict *dictCreate(dictType *type,
 }
 
 /* Initialize the hash table */
+/**
+ * 初始化字典
+ * */
 int _dictInit(dict *d, dictType *type,
         void *privDataPtr)
 {
@@ -132,6 +141,9 @@ int _dictInit(dict *d, dictType *type,
 
 /* Resize the table to the minimal size that contains all the elements,
  * but with the invariant of a USED/BUCKETS ratio near to <= 1 */
+ /**
+  * 将表调整到可以包含所有元素的最小大小
+  * */
 int dictResize(dict *d)
 {
     unsigned long minimal;
@@ -289,6 +301,9 @@ static void _dictRehashStep(dict *d) {
 }
 
 /* Add an element to the target hash table */
+/**
+ * 向hash表中插入一个键值对
+ * */
 int dictAdd(dict *d, void *key, void *val)
 {
     dictEntry *entry = dictAddRaw(d,key,NULL);

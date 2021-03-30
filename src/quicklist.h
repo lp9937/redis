@@ -44,13 +44,22 @@
  * attempted_compress: 1 bit, boolean, used for verifying during testing.
  * extra: 10 bits, free for future use; pads out the remainder of 32 bits */
 typedef struct quicklistNode {
+    //指向前置节点
     struct quicklistNode *prev;
+    //指向后置节点
     struct quicklistNode *next;
+    //压缩参数recompress设置为0时，zl指向一个ziplist
+    //压缩参数recompress设置不为0时，zl指向quicklistzf结构
     unsigned char *zl;
+    //压缩列表的总长度
     unsigned int sz;             /* ziplist size in bytes */
+    //压缩列表中的节点数
     unsigned int count : 16;     /* count of items in ziplist */
+    //编码类型
     unsigned int encoding : 2;   /* RAW==1 or LZF==2 */
+    //标记是否采用ziplist结构保存数据
     unsigned int container : 2;  /* NONE==1 or ZIPLIST==2 */
+    //标记zl指向的数据之前是否被压缩过
     unsigned int recompress : 1; /* was this node previous compressed? */
     unsigned int attempted_compress : 1; /* node can't compress; too small */
     unsigned int extra : 10; /* more bits to steal for future usage */
@@ -103,11 +112,28 @@ typedef struct quicklistBookmark {
  * 'bookmakrs are an optional feature that is used by realloc this struct,
  *      so that they don't consume memory when not used. */
 typedef struct quicklist {
+    //头节点
     quicklistNode *head;
+    //尾节点
     quicklistNode *tail;
+    //所有ziplist中总entry节点的个数
     unsigned long count;        /* total count of all entries in all ziplists */
+    //quicklistNode节点个数
     unsigned long len;          /* number of quicklistNodes */
+    //单个节点的填充因子，通过 list-max-ziplist-size 可配置
+    //-1: 每个quicklistNode节点的ziplist字节大小不能超过4kb。（建议）
+    //-2: 每个quicklistNode节点的ziplist字节大小不能超过8kb。（默认配置）
+    //-3: 每个quicklistNode节点的ziplist字节大小不能超过16kb。（一般不建议）
+    //-4: 每个quicklistNode节点的ziplist字节大小不能超过32kb。（不建议）
+    //-5: 每个quicklistNode节点的ziplist字节大小不能超过64kb。（正常工作量不建议）
+    //当数字为正数，表示：ziplist结构所最多包含的entry个数。最大值为 2^15
     int fill : QL_FILL_BITS;              /* fill factor for individual nodes */
+    //压缩程度值，通过 list-compress-depth 可配置，0表示不压缩
+    //0：表示不压缩
+    //1：表示 quicklist 列表的两端各有1个节点不压缩，中间的节点压缩
+    //2：表示 quicklist 列表的两端各有2个节点不压缩，中间的节点压缩
+    //3：表示 quicklist 列表的两端各有3个节点不压缩，中间的节点压缩
+    //依此类推，最大为2^26
     unsigned int compress : QL_COMP_BITS; /* depth of end nodes not to compress;0=off */
     unsigned int bookmark_count: QL_BM_BITS;
     quicklistBookmark bookmarks[];
