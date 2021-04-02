@@ -61,12 +61,19 @@ typedef struct dictEntry {
 } dictEntry;
 
 typedef struct dictType {
+    //计算hash值的函数
     uint64_t (*hashFunction)(const void *key);
+    //复制键的函数
     void *(*keyDup)(void *privdata, const void *key);
+    //复制值的函数
     void *(*valDup)(void *privdata, const void *obj);
+    //比较键的函数
     int (*keyCompare)(void *privdata, const void *key1, const void *key2);
+    //销毁键的函数
     void (*keyDestructor)(void *privdata, void *key);
+    //销毁值的函数
     void (*valDestructor)(void *privdata, void *obj);
+    //是否允许扩展的函数
     int (*expandAllowed)(size_t moreMem, double usedRatio);
 } dictType;
 
