@@ -37,54 +37,82 @@ int getGenericCommand(client *c);
  * String Commands
  *----------------------------------------------------------------------------*/
 
+/**
+ * 检查字符串长度
+ */
 static int checkStringLength(client *c, long long size) {
+    // 客户端不为 Master，且 size > proto_max_bulk_len，则返回 C_ERR
     if (!(c->flags & CLIENT_MASTER) && size > server.proto_max_bulk_len) {
         addReplyError(c,"string exceeds maximum allowed size (proto-max-bulk-len)");
         return C_ERR;
     }
+    // 否则返回 C_OK
     return C_OK;
 }
 
 /* The setGenericCommand() function implements the SET operation with different
  * options and variants. This function is called in order to implement the
  * following commands: SET, SETEX, PSETEX, SETNX, GETSET.
+ * 
+ * setGenericCommand()函数实现了 SET、SETEX、PSETEX、SETNX、GETSET 操作
  *
  * 'flags' changes the behavior of the command (NX, XX or GET, see below).
+ * 
+ * flags 参数的值可以是 NX、XX 或者 GET，它的意义详见下文
  *
  * 'expire' represents an expire to set in form of a Redis object as passed
  * by the user. It is interpreted according to the specified 'unit'.
+ * 
+ * expire 参数定义了 redis 对象的过期时间，过期时间单位由 unit 参数指定
  *
  * 'ok_reply' and 'abort_reply' is what the function will reply to the client
  * if the operation is performed, or when it is not because of NX or
  * XX flags.
+ * 
+ * 如果操作被执行， ok_reply 和 abort_reply 决定了向客户端回复的内容
+ * NX 和 XX 也会改变回复，
+ * NX 表示只有 key 不存在时，才创建 key，并设置 key 的值
+ * XX 表示只有 key 存在时，才设置 key 的值
  *
  * If ok_reply is NULL "+OK" is used.
- * If abort_reply is NULL, "$-1" is used. */
+ * 如果 ok_reply 为空，那么 "+OK" 被返回
+ * 
+ * If abort_reply is NULL, "$-1" is used.
+ * 如果 abort_reply 为空，"$-1" 被返回
+ * 
+ *  */
 
-#define OBJ_NO_FLAGS 0
-#define OBJ_SET_NX (1<<0)          /* Set if key not exists. */
-#define OBJ_SET_XX (1<<1)          /* Set if key exists. */
-#define OBJ_EX (1<<2)              /* Set if time in seconds is given */
-#define OBJ_PX (1<<3)              /* Set if time in ms in given */
-#define OBJ_KEEPTTL (1<<4)         /* Set and keep the ttl */
-#define OBJ_SET_GET (1<<5)         /* Set if want to get key before set */
-#define OBJ_EXAT (1<<6)            /* Set if timestamp in second is given */
-#define OBJ_PXAT (1<<7)            /* Set if timestamp in ms is given */
-#define OBJ_PERSIST (1<<8)         /* Set if we need to remove the ttl */
+#define OBJ_NO_FLAGS 0             // 没有设定参数
+#define OBJ_SET_NX (1<<0)          // 只有 key 不存在时，才设置值/* Set if key not exists. */
+#define OBJ_SET_XX (1<<1)          // 只有 key 存在时，才设置值/* Set if key exists. */
+#define OBJ_EX (1<<2)              // 设置过期时间，其单位为秒/* Set if time in seconds is given */
+#define OBJ_PX (1<<3)              // 设置过期时间，其单位为毫秒/* Set if time in ms in given */
+#define OBJ_KEEPTTL (1<<4)         // 保持原来 key 的过期时间/* Set and keep the ttl */
+#define OBJ_SET_GET (1<<5)         // 在设置 key 的值之前，获取 key 的旧值/* Set if want to get key before set */
+#define OBJ_EXAT (1<<6)            // 单位为秒的时间戳/* Set if timestamp in second is given */
+#define OBJ_PXAT (1<<7)            // 单位为毫秒的时间戳/* Set if timestamp in ms is given */
+#define OBJ_PERSIST (1<<8)         // 移除 key 的过期时间/* Set if we need to remove the ttl */
 
 void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire, int unit, robj *ok_reply, robj *abort_reply) {
     long long milliseconds = 0, when = 0; /* initialized to avoid any harmness warning */
-
+    
     if (expire) {
+        // 取出过期时间，保存在 milliseconds
         if (getLongLongFromObjectOrReply(c, expire, &milliseconds, NULL) != C_OK)
             return;
+        // 过期时间值不是有效值，过期时间必须是正数，且单位为秒的时候，过期时间要小于等于 LLONG_MAX / 1000
         if (milliseconds <= 0 || (unit == UNIT_SECONDS && milliseconds > LLONG_MAX / 1000)) {
             /* Negative value provided or multiplication is gonna overflow. */
+            // 向客户端回复错误信息
             addReplyErrorFormat(c, "invalid expire time in %s", c->cmd->name);
             return;
         }
+        // 不论输入的过期时间是秒还是毫秒
+        // Redis 实际都以毫秒的形式保存过期时间
+        // 如果过期时间单位为秒，则将其转换为毫秒
         if (unit == UNIT_SECONDS) milliseconds *= 1000;
         when = milliseconds;
+        // 计算 key 的过期时间
         if ((flags & OBJ_PX) || (flags & OBJ_EX))
             when += mstime();
         if (when <= 0) {
@@ -93,7 +121,9 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
             return;
         }
     }
-
+    // 如果设置了 NX 参数，则检查 key 不存在
+    // 如果设置了 XX 参数，则检查 key 存在
+    // 在条件不符合时报错，报错的内容由 abort_reply 参数决定
     if ((flags & OBJ_SET_NX && lookupKeyWrite(c->db,key) != NULL) ||
         (flags & OBJ_SET_XX && lookupKeyWrite(c->db,key) == NULL))
     {
@@ -101,15 +131,22 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
         return;
     }
 
+    // GETSET 命令
     if (flags & OBJ_SET_GET) {
+        // 执行 GET 命令，获取 key 的旧值
         if (getGenericCommand(c) == C_ERR) return;
     }
 
+    // 设置 key 的值
     genericSetKey(c,c->db,key, val,flags & OBJ_KEEPTTL,1);
+    // 上次保存后对数据库的更改次数，将数据库设为脏
     server.dirty++;
+    // 发送事件通知
     notifyKeyspaceEvent(NOTIFY_STRING,"set",key,c->db->id);
     if (expire) {
+        // 设置过期时间
         setExpire(c,c->db,key,when);
+        // 发送时间通知
         notifyKeyspaceEvent(NOTIFY_GENERIC,"expire",key,c->db->id);
 
         /* Propagate as SET Key Value PXAT millisecond-timestamp if there is EXAT/PXAT or
@@ -155,7 +192,10 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
 /*
  * The parseExtendedStringArgumentsOrReply() function performs the common validation for extended
  * string arguments used in SET and GET command.
- *
+ * 
+ * parseExtendedStringArgumentsOrReply() 函数的作用是对 
+ * SET 和 GET 命令中的扩展参数执行公共验证
+ * 
  * Get specific commands - PERSIST/DEL
  * Set specific commands - XX/NX/GET
  * Common commands - EX/EXAT/PX/PXAT/KEEPTTL

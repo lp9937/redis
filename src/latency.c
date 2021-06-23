@@ -112,6 +112,12 @@ void latencyMonitorInit(void) {
  * This function is usually called via latencyAddSampleIfNeeded(), that
  * is a macro that only adds the sample if the latency is higher than
  * server.latency_monitor_threshold. */
+/**
+ * 
+ * 该函数通常被 latencyAddSampleIfNeeded() 调用
+ * 如果延迟高于 server.latency_monitor_threshold，
+ * 则将添加 Sample 到指定的 Event 对象的 Sample 列表中 
+ */
 void latencyAddSample(const char *event, mstime_t latency) {
     struct latencyTimeSeries *ts = dictFetchValue(server.latency_events,event);
     time_t now = time(NULL);

@@ -284,6 +284,7 @@ typedef int (*RedisModuleNotificationFunc) (RedisModuleCtx *ctx, int type, const
  * See RM_SubscribeToKeyspaceEvents() for more information. */
 typedef struct RedisModuleKeyspaceSubscriber {
     /* The module subscribed to the event */
+    // 订阅事件的模块
     RedisModule *module;
     /* Notification callback in the module*/
     RedisModuleNotificationFunc notify_callback;
@@ -322,14 +323,17 @@ typedef void (*RedisModuleCommandFilterFunc) (RedisModuleCommandFilterCtx *filte
 
 typedef struct RedisModuleCommandFilter {
     /* The module that registered the filter */
+    // 注册过滤器的模块
     RedisModule *module;
     /* Filter callback function */
+    // 过滤器回掉函数
     RedisModuleCommandFilterFunc callback;
     /* REDISMODULE_CMDFILTER_* flags */
     int flags;
 } RedisModuleCommandFilter;
 
 /* Registered filters */
+// 命令过滤器
 static list *moduleCommandFilters;
 
 typedef void (*RedisModuleForkDoneHandler) (int exitcode, int bysignal, void *user_data);
@@ -7318,12 +7322,16 @@ int RM_UnregisterCommandFilter(RedisModuleCtx *ctx, RedisModuleCommandFilter *fi
 
     return REDISMODULE_OK;
 }
-
+/**
+ * 命令过滤器
+ */
 void moduleCallCommandFilters(client *c) {
+    // 如果没有注册命令过滤器，直接返回
     if (listLength(moduleCommandFilters) == 0) return;
 
     listIter li;
     listNode *ln;
+    // 创建列表迭代器
     listRewind(moduleCommandFilters,&li);
 
     RedisModuleCommandFilterCtx filter = {
@@ -7332,14 +7340,20 @@ void moduleCallCommandFilters(client *c) {
     };
 
     while((ln = listNext(&li))) {
+        // 过滤器
         RedisModuleCommandFilter *f = ln->value;
 
         /* Skip filter if REDISMODULE_CMDFILTER_NOSELF is set and module is
          * currently processing a command.
          */
+        /**
+         * 过滤器被设置成 REDISMODULE_CMDFILTER_NOSELF，
+         * 且设置过滤器的模块当前正在处理命令，则跳过该过滤器
+         */
         if ((f->flags & REDISMODULE_CMDFILTER_NOSELF) && f->module->in_call) continue;
 
         /* Call filter */
+        // 调用过滤器回掉函数
         f->callback(&filter);
     }
 
@@ -8122,7 +8136,7 @@ int RM_IsSubEventSupported(RedisModuleEvent event, int64_t subevent) {
 }
 
 /* This is called by the Redis internals every time we want to fire an
- * event that can be interceppted by some module. The pointer 'data' is useful
+ * event that can be intercepted by some module. The pointer 'data' is useful
  * in order to populate the event-specific structure when needed, in order
  * to return the structure with more information to the callback.
  *

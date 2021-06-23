@@ -229,11 +229,18 @@ void listReleaseIterator(listIter *iter) {
 }
 
 /* Create an iterator in the list private iterator structure */
+/**
+ * 创建一个列表迭代器
+ * 从头开始迭代
+ */
 void listRewind(list *list, listIter *li) {
     li->next = list->head;
     li->direction = AL_START_HEAD;
 }
-
+/**
+ * 创建一个列表迭代器
+ * 从尾开始迭代
+ */
 void listRewindTail(list *list, listIter *li) {
     li->next = list->tail;
     li->direction = AL_START_TAIL;

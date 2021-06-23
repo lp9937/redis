@@ -143,20 +143,30 @@ size_t lazyfreeGetFreeEffort(robj *key, robj *obj) {
  * If there are enough allocations to free the value object may be put into
  * a lazy free list instead of being freed synchronously. The lazy free list
  * will be reclaimed in a different bio.c thread. */
+/**
+ * 从数据库中删除键、键的值以及给键配置的过期时间
+ * 将要释放内存的对象放到延迟释放列表中，通过另外
+ * 的 bio 线程来释放列表中的对象
+ */
 #define LAZYFREE_THRESHOLD 64
 int dbAsyncDelete(redisDb *db, robj *key) {
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
+    // 从过期字典中删除键的过期时间
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
 
     /* If the value is composed of a few allocations, to free in a lazy way
      * is actually just slower... So under a certain limit we just free
      * the object synchronously. */
+    /**
+     * 从数据库中删除键，此时还没有释放键值的内存空间
+     */
     dictEntry *de = dictUnlink(db->dict,key->ptr);
     if (de) {
         robj *val = dictGetVal(de);
 
         /* Tells the module that the key has been unlinked from the database. */
+        // 通知模块键值已经从数据库中移除
         moduleNotifyKeyUnlink(key,val);
 
         size_t free_effort = lazyfreeGetFreeEffort(key,val);
@@ -180,6 +190,7 @@ int dbAsyncDelete(redisDb *db, robj *key) {
      * field to NULL in order to lazy free it later. */
     if (de) {
         dictFreeUnlinkedEntry(db->dict,de);
+        // 如果开启了集群模式，则通知其他槽删除键
         if (server.cluster_enabled) slotToKeyDel(key->ptr);
         return 1;
     } else {

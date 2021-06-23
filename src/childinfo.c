@@ -132,7 +132,9 @@ int readChildInfo(childInfoType *information_type, size_t *cow, size_t *keys, do
     }
 }
 
-/* Receive info data from child. */
+/* Receive info data from child. 
+ * 接收从子进程发来的数据
+ */
 void receiveChildInfo(void) {
     if (server.child_info_pipe[0] == -1) return;
 

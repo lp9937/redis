@@ -31,8 +31,11 @@
 
 /* ================================ MULTI/EXEC ============================== */
 
-/* Client state initialization for MULTI/EXEC */
+/* Client state initialization for MULTI/EXEC 
+ * 初始化客户端的事务状态
+ */
 void initClientMultiState(client *c) {
+    // 命令队列
     c->mstate.commands = NULL;
     c->mstate.count = 0;
     c->mstate.cmd_flags = 0;
@@ -54,7 +57,9 @@ void freeClientMultiState(client *c) {
     zfree(c->mstate.commands);
 }
 
-/* Add a new command into the MULTI commands queue */
+/* Add a new command into the MULTI commands queue 
+ * 添加命令到事务队列中
+ */
 void queueMultiCommand(client *c) {
     multiCmd *mc;
     int j;
@@ -62,19 +67,29 @@ void queueMultiCommand(client *c) {
     /* No sense to waste memory if the transaction is already aborted.
      * this is useful in case client sends these in a pipeline, or doesn't
      * bother to read previous responses and didn't notice the multi was already
-     * aborted. */
+     * aborted. 
+     * 
+     * 如果事务已经被中止，则直接返回
+     * 
+     * */
     if (c->flags & CLIENT_DIRTY_EXEC)
         return;
 
+    // 为新元素分配空间
     c->mstate.commands = zrealloc(c->mstate.commands,
             sizeof(multiCmd)*(c->mstate.count+1));
+    // 指向新元素
     mc = c->mstate.commands+c->mstate.count;
+    // 命令处理函数
     mc->cmd = c->cmd;
+    // 命令参数个数
     mc->argc = c->argc;
+    // 命令参数列表
     mc->argv = zmalloc(sizeof(robj*)*c->argc);
     memcpy(mc->argv,c->argv,sizeof(robj*)*c->argc);
     for (j = 0; j < c->argc; j++)
         incrRefCount(mc->argv[j]);
+    // 事务命令个数加 1
     c->mstate.count++;
     c->mstate.cmd_flags |= c->cmd->flags;
     c->mstate.cmd_inv_flags |= ~c->cmd->flags;
@@ -89,6 +104,10 @@ void discardTransaction(client *c) {
 
 /* Flag the transaction as DIRTY_EXEC so that EXEC will fail.
  * Should be called every time there is an error while queueing a command. */
+/**
+ * 将事务状态设置成 DIRTY_EXEC，让之后的 EXEC 命令失败
+ * 当每次入队命令出错时调用此函数
+ */
 void flagTransaction(client *c) {
     if (c->flags & CLIENT_MULTI)
         c->flags |= CLIENT_DIRTY_EXEC;
@@ -157,6 +176,9 @@ void execCommandAbort(client *c, sds error) {
         replicationFeedMonitors(c,server.monitors,c->db->id,c->argv,c->argc);
 }
 
+/**
+ * 执行事务
+ */
 void execCommand(client *c) {
     int j;
     robj **orig_argv;
@@ -164,45 +186,65 @@ void execCommand(client *c) {
     struct redisCommand *orig_cmd;
     int was_master = server.masterhost == NULL;
 
+    // 客户端没有执行事务，直接返回
     if (!(c->flags & CLIENT_MULTI)) {
         addReplyError(c,"EXEC without MULTI");
         return;
     }
 
     /* Check if we need to abort the EXEC because:
+     * 检查是否需要中止 EXEC 的执行，其中如下原因需要中止:
+     *
      * 1) Some WATCHed key was touched.
+     *    被监视的键已经被修改了
      * 2) There was a previous error while queueing commands.
+     *    命令在入队时发生错误
      * A failed EXEC in the first case returns a multi bulk nil object
      * (technically it is not an error but a special behavior), while
      * in the second an EXECABORT error is returned. */
     if (c->flags & (CLIENT_DIRTY_CAS|CLIENT_DIRTY_EXEC)) {
         addReply(c, c->flags & CLIENT_DIRTY_EXEC ? shared.execaborterr :
                                                    shared.nullarray[c->resp]);
+        
+        // 取消事务
         discardTransaction(c);
         goto handle_monitor;
     }
 
     uint64_t old_flags = c->flags;
 
-    /* we do not want to allow blocking commands inside multi */
+    /* we do not want to allow blocking commands inside multi 
+     * 
+     * 不允许事务中有阻塞命令
+     */
     c->flags |= CLIENT_DENY_BLOCKING;
 
     /* Exec all the queued commands */
+    // 已经可以保证安全性了，取消客户端对所有键的监视
     unwatchAllKeys(c); /* Unwatch ASAP otherwise we'll waste CPU cycles */
 
     server.in_exec = 1;
 
+    // 因为事务中的命令在执行时可能会修改命令和命令的参数
+    // 所以为了正确地传播命令，需要现备份这些命令和参数
     orig_argv = c->argv;
     orig_argc = c->argc;
     orig_cmd = c->cmd;
     addReplyArrayLen(c,c->mstate.count);
+    // 执行事务
     for (j = 0; j < c->mstate.count; j++) {
+
+        // 因为 Redis 的命令必须在客户端的上下文中执行
+        // 所以要将事务队列中的命令、命令参数等设置给客户端
         c->argc = c->mstate.commands[j].argc;
         c->argv = c->mstate.commands[j].argv;
         c->cmd = c->mstate.commands[j].cmd;
 
         /* ACL permissions are also checked at the time of execution in case
-         * they were changed after the commands were ququed. */
+         * they were changed after the commands were ququed. 
+         * 
+         * 为了防止命令发生改变，因此在命令执行的时候也会进行 ACL 权限检查
+         */
         int acl_errpos;
         int acl_retval = ACLCheckCommandPerm(c,&acl_errpos);
         if (acl_retval == ACL_OK && c->cmd->proc == publishCommand)
@@ -235,6 +277,7 @@ void execCommand(client *c) {
         }
 
         /* Commands may alter argc/argv, restore mstate. */
+        // 命令可能修改参数/参数个数，此处还原 mstate
         c->mstate.commands[j].argc = c->argc;
         c->mstate.commands[j].argv = c->argv;
         c->mstate.commands[j].cmd = c->cmd;
@@ -243,23 +286,35 @@ void execCommand(client *c) {
     // restore old DENY_BLOCKING value
     if (!(old_flags & CLIENT_DENY_BLOCKING))
         c->flags &= ~CLIENT_DENY_BLOCKING;
-
+    
+    // 还原命令、命令参数
     c->argv = orig_argv;
     c->argc = orig_argc;
     c->cmd = orig_cmd;
+
+    // 清理事务状态
     discardTransaction(c);
 
     /* Make sure the EXEC command will be propagated as well if MULTI
-     * was already propagated. */
+     * was already propagated. 
+     *
+     * 如果 MULTI 已经被传播，需要确保 EXEC 命令也被传播
+     */
     if (server.propagate_in_transaction) {
         int is_master = server.masterhost == NULL;
+        // 将服务器设置为脏
         server.dirty++;
         beforePropagateMultiOrExec(0);
         /* If inside the MULTI/EXEC block this instance was suddenly
          * switched from master to slave (using the SLAVEOF command), the
          * initial MULTI was propagated into the replication backlog, but the
          * rest was not. We need to make sure to at least terminate the
-         * backlog with the final EXEC. */
+         * backlog with the final EXEC. 
+         * 
+         * 如果在 MULTI/EXEC 块中，这个实例突然从 Master 切换到 Slave,
+         * 此时这 MULTI 已经被传播到复制 backlog 中，但是这其余的还没有。
+         * 需要确保 backlog 以 EXEC 终止
+         * */
         if (server.repl_backlog && was_master && !is_master) {
             char *execcmd = "*1\r\n$4\r\nEXEC\r\n";
             feedReplicationBacklog(execcmd,strlen(execcmd));

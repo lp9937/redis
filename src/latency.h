@@ -69,6 +69,9 @@ int THPDisable(void);
 /* Latency monitoring macros. */
 
 /* Start monitoring an event. We just set the current time. */
+/**
+ * 开始监视事件。我们只是设定了当前时间
+ */
 #define latencyStartMonitor(var) if (server.latency_monitor_threshold) { \
     var = mstime(); \
 } else { \
@@ -77,11 +80,17 @@ int THPDisable(void);
 
 /* End monitoring an event, compute the difference with the current time
  * to check the amount of time elapsed. */
+/**
+ * 结束监视事件。计算监视事件执行的时间
+ */
 #define latencyEndMonitor(var) if (server.latency_monitor_threshold) { \
     var = mstime() - var; \
 }
 
 /* Add the sample only if the elapsed time is >= to the configured threshold. */
+/**
+ * 
+ */
 #define latencyAddSampleIfNeeded(event,var) \
     if (server.latency_monitor_threshold && \
         (var) >= server.latency_monitor_threshold) \

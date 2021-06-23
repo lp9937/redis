@@ -138,11 +138,17 @@ static off_t rioFileTell(rio *r) {
 static int rioFileFlush(rio *r) {
     return (fflush(r->io.file.fp) == 0) ? 1 : 0;
 }
-
+/**
+ * 流为文件时所使用的结构
+ */
 static const rio rioFileIO = {
+    // 读函数
     rioFileRead,
+    // 写函数
     rioFileWrite,
+    // 偏移量函数
     rioFileTell,
+    // 缓冲区 Flush 函数
     rioFileFlush,
     NULL,           /* update_checksum */
     0,              /* current checksum */
@@ -151,7 +157,9 @@ static const rio rioFileIO = {
     0,              /* read/write chunk size */
     { { NULL, 0 } } /* union for io-specific vars */
 };
-
+/**
+ * 初始化文件流
+ */
 void rioInitWithFile(rio *r, FILE *fp) {
     *r = rioFileIO;
     r->io.file.fp = fp;
@@ -391,11 +399,16 @@ void rioGenericUpdateChecksum(rio *r, const void *buf, size_t len) {
 /* Set the file-based rio object to auto-fsync every 'bytes' file written.
  * By default this is set to zero that means no automatic file sync is
  * performed.
+ * 
+ * 每写 ‘bytes’ 字节数据，就执行一次文件同步
  *
  * This feature is useful in a few contexts since when we rely on OS write
  * buffers sometimes the OS buffers way too much, resulting in too many
  * disk I/O concentrated in very little time. When we fsync in an explicit
  * way instead the I/O pressure is more distributed across time. */
+ /**
+  * 
+  */
 void rioSetAutoSync(rio *r, off_t bytes) {
     if(r->write != rioFileIO.write) return;
     r->io.file.autosync = bytes;

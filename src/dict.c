@@ -147,7 +147,6 @@ int _dictInit(dict *d, dictType *type,
  * but with the invariant of a USED/BUCKETS ratio near to <= 1 */
  /*
   * 将表调整到可以包含所有元素的最小大小
-  * 
   */
 int dictResize(dict *d)
 {
@@ -164,7 +163,7 @@ int dictResize(dict *d)
  * when malloc_failed is non-NULL, it'll avoid panic if malloc fails (in which case it'll be set to 1).
  * Returns DICT_OK if expand was performed, and DICT_ERR if skipped. */
 /**
- * 扩展或创建哈希表
+ * 扩展、收缩或创建哈希表
  * */
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 {
@@ -205,6 +204,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     }
 
     /* Prepare a second hash table for incremental rehashing */
+    //为渐进式rehash准备第二个哈希表ht[1]
     d->ht[1] = n;
     d->rehashidx = 0;
     return DICT_OK;
@@ -634,8 +634,8 @@ dictEntry *dictFind(dict *d, const void *key)
     return NULL;
 }
 /*
- *根据键查找字典中键对应的值
- *字典中包含指定键，返回键对应的值，否则返回 NULL
+ * 根据键查找字典中键对应的值
+ * 字典中包含指定键，返回键对应的值，否则返回 NULL
  */
 void *dictFetchValue(dict *d, const void *key) {
     dictEntry *he;
@@ -1135,9 +1135,9 @@ static int dictTypeExpandAllowed(dict *d) {
 }
 
 /* Expand the hash table if needed */
-/**根据需要，初始化字典的哈希表，或者对字典的哈希表进行扩容
-* T=O(N)
-*/
+/* 根据需要，初始化字典的哈希表，或者对字典的哈希表进行扩容
+ * T=O(N)
+ */
 static int _dictExpandIfNeeded(dict *d)
 {
     /* Incremental rehashing already in progress. Return. */
@@ -1205,7 +1205,7 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
     if (existing) *existing = NULL;
 
     /* Expand the hash table if needed */
-    //单步 rehash
+    // 如果满足条件，则扩展哈希表空间
     if (_dictExpandIfNeeded(d) == DICT_ERR)
         return -1;
     for (table = 0; table <= 1; table++) {

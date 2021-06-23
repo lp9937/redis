@@ -44,6 +44,9 @@ struct _rio {
     /* Backend functions.
      * Since this functions do not tolerate short writes or reads the return
      * value is simplified to: zero on error, non zero on complete success. */
+    /**
+     * 由于此函数不允许短写或短读，因此返回值简化为：出错时为零，完全成功时为非零
+     */
     size_t (*read)(struct _rio *, void *buf, size_t len);
     size_t (*write)(struct _rio *, const void *buf, size_t len);
     off_t (*tell)(struct _rio *);
@@ -65,6 +68,7 @@ struct _rio {
     size_t max_processing_chunk;
 
     /* Backend-specific vars. */
+    // 后端特定变量
     union {
         /* In-memory buffer target. */
         struct {
@@ -72,9 +76,12 @@ struct _rio {
             off_t pos;
         } buffer;
         /* Stdio file pointer target. */
+        // 标准文件结构
         struct {
             FILE *fp;
+            // 上次 fsync 后写入的字节数
             off_t buffered; /* Bytes written since last fsync. */
+            // 写入 “autosync” 字节后 fsync
             off_t autosync; /* fsync after 'autosync' bytes written. */
         } file;
         /* Connection object (used to read from socket) */

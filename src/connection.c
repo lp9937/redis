@@ -32,39 +32,67 @@
 
 /* The connections module provides a lean abstraction of network connections
  * to avoid direct socket and async event management across the Redis code base.
- *
+ * 
+ * connections 模块提供了网络连接的精简抽象，
+ * 避免了跨 Redis 代码库直接进行 socket 和
+ * 异步事件的管理
+ * 
  * It does NOT provide advanced connection features commonly found in similar
  * libraries such as complete in/out buffer management, throttling, etc. These
  * functions remain in networking.c.
+ * 
+ * 与其它类似库相比，该模块没有提供输入输出缓冲区管理、限制等高级连接功能。
+ * 而这些功能的实现在 networking.c 中
  *
  * The primary goal is to allow transparent handling of TCP and TLS based
  * connections. To do so, connections have the following properties:
  *
+ * 这样做的主要目的是透明的处理基于 TCP 和 TLS 的连接。
+ * 为此，连接具有以下属性：
+ * 
  * 1. A connection may live before its corresponding socket exists.  This
  *    allows various context and configuration setting to be handled before
  *    establishing the actual connection.
+ * 
+ *    一个连接可能先于它关联的套接字存在之前存在。
+ *    因此在建立实际连接之前，允许处理各种上下文和配置设置
+ * 
  * 2. The caller may register/unregister logical read/write handlers to be
  *    called when the connection has data to read from/can accept writes.
  *    These logical handlers may or may not correspond to actual AE events,
  *    depending on the implementation (for TCP they are; for TLS they aren't).
+ * 
+ *    当连接有数据要读取/写入的时候，调用者可以注册/注销逻辑读/写处理程序
  */
 
 ConnectionType CT_Socket;
 
 /* When a connection is created we must know its type already, but the
  * underlying socket may or may not exist:
+ * 
+ * 当一个连接被创建的时候，它的类型必须是已知的，而此时底层的套接字
+ * 可能存在或可能不存在。
  *
  * - For accepted connections, it exists as we do not model the listen/accept
  *   part; So caller calls connCreateSocket() followed by connAccept().
+ *   
+ *   对于接受连接的方，底层套接字是存在的，因此不用对 listen/accept 部分进行建模；
+ *   调用者在调用 connCreateSocket() 函数之后调用 connAccept() 函数创建连接
+ * 
  * - For outgoing connections, the socket is created by the connection module
  *   itself; So caller calls connCreateSocket() followed by connConnect(),
  *   which registers a connect callback that fires on connected/error state
  *   (and after any transport level handshake was done).
- *
+ *   
+ *   对于发起连接的方，套接字被连接模型自己创建；因此调用者在调用 connCreateSocket()
+ *   函数之后调用 connConnect() 函数创建连接
+ *   
  * NOTE: An earlier version relied on connections being part of other structs
  * and not independently allocated. This could lead to further optimizations
  * like using container_of(), etc.  However it was discontinued in favor of
  * this approach for these reasons:
+ * 
+ * 注意：在早期版本中，连接模块是其它结构的一部分，不是独立的模块。
  *
  * 1. In some cases conns are created/handled outside the context of the
  * containing struct, in which case it gets a bit awkward to copy them.
@@ -84,13 +112,24 @@ connection *connCreateSocket() {
 
 /* Create a new socket-type connection that is already associated with
  * an accepted connection.
+ * 
+ * accept() 获取客户端连接以后，
+ * 创建一个与该连接相关的 socket-type 的新连接
  *
  * The socket is not ready for I/O until connAccept() was called and
  * invoked the connection-level accept handler.
+ * 
+ * 直到 connAccept() 和连接层的接收处理函数被调用，
+ * 该 socket 才准备好进行 I/O
  *
  * Callers should use connGetState() and verify the created connection
  * is not in an error state (which is not possible for a socket connection,
  * but could but possible with other protocols).
+ * 
+ * 调用者应该使用 connGetState() 获取创建的新连接的状态，
+ * 并验证新连接的状态没有问题。虽然 socket 连接不会出现这种
+ * 情况，但其它协议的连接可能会出现这种情况，所以需要验证。
+ * 
  */
 connection *connCreateAcceptedSocket(int fd) {
     connection *conn = connCreateSocket();
@@ -98,7 +137,9 @@ connection *connCreateAcceptedSocket(int fd) {
     conn->state = CONN_STATE_ACCEPTING;
     return conn;
 }
-
+/*
+ * 连接 socket
+ */
 static int connSocketConnect(connection *conn, const char *addr, int port, const char *src_addr,
         ConnectionCallbackFunc connect_handler) {
     int fd = anetTcpNonBlockBestEffortBindConnect(NULL,addr,port,src_addr);
@@ -129,6 +170,9 @@ int connHasReadHandler(connection *conn) {
 }
 
 /* Associate a private data pointer with the connection */
+/**
+ * 给 connect 的私有数据指针赋值
+ */
 void connSetPrivateData(connection *conn, void *data) {
     conn->private_data = data;
 }
@@ -199,6 +243,7 @@ static int connSocketAccept(connection *conn, ConnectionCallbackFunc accept_hand
     int ret = C_OK;
 
     if (conn->state != CONN_STATE_ACCEPTING) return C_ERR;
+    // 将连接状态改为 CONN_STATE_CONNECTED
     conn->state = CONN_STATE_CONNECTED;
 
     connIncrRefs(conn);
@@ -210,11 +255,15 @@ static int connSocketAccept(connection *conn, ConnectionCallbackFunc accept_hand
 
 /* Register a write handler, to be called when the connection is writable.
  * If NULL, the existing handler is removed.
+ * 
+ * 注册一个写处理器，当连接可写时写处理器被调用
+ * 如果传入的处理器为 NULL，则移除现存的处理器
  *
  * The barrier flag indicates a write barrier is requested, resulting with
  * CONN_FLAG_WRITE_BARRIER set. This will ensure that the write handler is
  * always called before and not after the read handler in a single event
  * loop.
+ * 在单个事件循环，确保写处理器总是在读处理器之前被调用
  */
 static int connSocketSetWriteHandler(connection *conn, ConnectionCallbackFunc func, int barrier) {
     if (func == conn->write_handler) return C_OK;
@@ -234,14 +283,22 @@ static int connSocketSetWriteHandler(connection *conn, ConnectionCallbackFunc fu
 
 /* Register a read handler, to be called when the connection is readable.
  * If NULL, the existing handler is removed.
+ * 
+ * 注册一个读处理器，当连接可读时读处理器被调用
+ * 如果传入的处理器为 NULL，则移除现存的处理器
  */
 static int connSocketSetReadHandler(connection *conn, ConnectionCallbackFunc func) {
     if (func == conn->read_handler) return C_OK;
 
     conn->read_handler = func;
+
     if (!conn->read_handler)
+        // 读处理器为空，删除给定套接字的给定事件的监听，
+        // 并取消事件和事件处理器之间的关联
         aeDeleteFileEvent(server.el,conn->fd,AE_READABLE);
     else
+        // 添加对给定套接字的给定事件的监听
+        // 并将事件和事件处理器进行关联
         if (aeCreateFileEvent(server.el,conn->fd,
                     AE_READABLE,conn->type->ae_handler,conn) == AE_ERR) return C_ERR;
     return C_OK;

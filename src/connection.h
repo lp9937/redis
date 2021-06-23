@@ -35,7 +35,9 @@
 
 struct aeEventLoop;
 typedef struct connection connection;
-
+/**
+ * 连接状态
+ */
 typedef enum {
     CONN_STATE_NONE = 0,
     CONN_STATE_CONNECTING,
@@ -161,6 +163,9 @@ static inline int connSetWriteHandler(connection *conn, ConnectionCallbackFunc f
 
 /* Register a read handler, to be called when the connection is readable.
  * If NULL, the existing handler is removed.
+ * 
+ * 注册一个读处理器，当连接可读时被调用
+ * 如果传入的处理器为 NULL，则移除现存的处理器
  */
 static inline int connSetReadHandler(connection *conn, ConnectionCallbackFunc func) {
     return conn->type->set_read_handler(conn, func);

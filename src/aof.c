@@ -199,12 +199,19 @@ ssize_t aofRewriteBufferWrite(int fd) {
 
 /* Return true if an AOf fsync is currently already in progress in a
  * BIO thread. */
+/**
+ * 如果当前正在进行 AOF 同步，则返回 true
+ * 否则返回 false
+ */
 int aofFsyncInProgress(void) {
     return bioPendingJobsOfType(BIO_AOF_FSYNC) != 0;
 }
 
 /* Starts a background task that performs fsync() against the specified
  * file descriptor (the one of the AOF file) in another thread. */
+/**
+ * 开启一个后台任务，在指定的文件描述符上执行 fsync 操作
+ */
 void aof_background_fsync(int fd) {
     bioCreateFsyncJob(fd);
 }
@@ -305,6 +312,10 @@ int startAppendOnly(void) {
  * is likely to fail. However apparently in modern systems this is no longer
  * true, and in general it looks just more resilient to retry the write. If
  * there is an actual error condition we'll get it at the next try. */
+/**
+ * 这是对 write 系统调用的包装，为的是能够在短时间写或系统调用被中断的时候，
+ * 能够进行重试。
+ */
 ssize_t aofWrite(int fd, const char *buf, size_t len) {
     ssize_t nwritten = 0, totwritten = 0;
 
@@ -326,34 +337,61 @@ ssize_t aofWrite(int fd, const char *buf, size_t len) {
 
 /* Write the append only file buffer on disk.
  *
+ * 将 aof 缓冲区的内容写到磁盘
+ *
  * Since we are required to write the AOF before replying to the client,
  * and the only way the client socket can get a write is entering when the
  * the event loop, we accumulate all the AOF writes in a memory
  * buffer and write it on disk using this function just before entering
  * the event loop again.
+ * 
+ * 因为需要在回复客户端之前对 AOF 执行写入操作，
+ * 而客户端能执行写入操作的唯一机会是在事件 loop 中
+ * 因此 Redis 将所有 AOF 写操作都累积到内存缓冲区中
+ * 并在重新进入事件 loop 之前，使用此函数将缓冲区内容写入到磁盘中
  *
  * About the 'force' argument:
- *
+ * 
+ * 关于 force 参数
+ * 
  * When the fsync policy is set to 'everysec' we may delay the flush if there
  * is still an fsync() going on in the background thread, since for instance
  * on Linux write(2) will be blocked by the background fsync anyway.
+ * 
+ * 当 fsync 策略设置成 ‘everysec’ 的时候，如果后台有一个线程正在进行 fsync 操作，此时
+ * 可以延迟进行 flush 操作，因为在 Linux 操作系统中，write(2) 操作将被后台的 fsync
+ * 操作阻塞。
+ * 
  * When this happens we remember that there is some aof buffer to be
  * flushed ASAP, and will try to do that in the serverCron() function.
- *
+ * 
+ * 当这种情况发生时，说明需要尽快对 AOF 缓冲区进行 flush 操作，
+ * Redis会尝试在 serverCron() 函数中对缓存进行 flush 操作
+ * 
  * However if force is set to 1 we'll write regardless of the background
- * fsync. */
+ * fsync. 
+ * 
+ * 如果 force 被设置成 1，无论后台是否有 fsync 操作，程序都直接进行写入
+ * */
 #define AOF_WRITE_LOG_ERROR_RATE 30 /* Seconds between errors logging. */
 void flushAppendOnlyFile(int force) {
     ssize_t nwritten;
     int sync_in_progress = 0;
     mstime_t latency;
 
+    // 缓冲区没有任何内容
     if (sdslen(server.aof_buf) == 0) {
         /* Check if we need to do fsync even the aof buffer is empty,
          * because previously in AOF_FSYNC_EVERYSEC mode, fsync is
          * called only when aof buffer is not empty, so if users
          * stop write commands before fsync called in one second,
          * the data in page cache cannot be flushed in time. */
+        /**
+         * 即使 aof 缓冲区为空，也要检查是否需要进行 fsync 操作，
+         * 因为在 AOF_FSYNC_EVERYSEC 模式下，fsync 操作仅仅当
+         * aof 缓冲区不为空的时候被调用，因此当用户在一秒之内 fsync
+         * 操作被调用之前停止写，内存页缓冲区中的数据将不能及时被 flush
+         */
         if (server.aof_fsync == AOF_FSYNC_EVERYSEC &&
             server.aof_fsync_offset != server.aof_current_size &&
             server.unixtime > server.aof_last_fsync &&
@@ -363,52 +401,94 @@ void flushAppendOnlyFile(int force) {
             return;
         }
     }
-
+    
+    // 策略为每秒 fsync 
     if (server.aof_fsync == AOF_FSYNC_EVERYSEC)
+        // 是否正在进行 fsync 操作
         sync_in_progress = aofFsyncInProgress();
 
+    // 策略为每秒 fsync ，并且 force 为 0，不允许强制写入
     if (server.aof_fsync == AOF_FSYNC_EVERYSEC && !force) {
         /* With this append fsync policy we do background fsyncing.
          * If the fsync is still in progress we can try to delay
          * the write for a couple of seconds. */
+        /**
+         * 当 fsync 策略为每秒钟一次时， fsync 在后台执行。
+         * 如果当前后台正在进行 fsync 操作，将延迟几秒钟再进行写入
+         */
         if (sync_in_progress) {
+            // 后台正在进行 fsync 操作
             if (server.aof_flush_postponed_start == 0) {
                 /* No previous write postponing, remember that we are
                  * postponing the flush and return. */
+                /**
+                 * 之前没有推迟过 write 操作，将 flush 操作推迟到 server.unixtime
+                 * 执行，并记录下这个时间，然后返回
+                 */
                 server.aof_flush_postponed_start = server.unixtime;
                 return;
             } else if (server.unixtime - server.aof_flush_postponed_start < 2) {
                 /* We were already waiting for fsync to finish, but for less
                  * than two seconds this is still ok. Postpone again. */
+                /**
+                 * 已经在等待 fsync 操作完成，但是时间不到 2 秒钟，这仍然是正常的，
+                 * 再次推迟执行
+                 */
                 return;
             }
             /* Otherwise fall trough, and go write since we can't wait
              * over two seconds. */
+            /**
+             * 如果后台还有 fync 操作在执行，且 write 推迟执行时间 >=2 秒，
+             * 那么仍然执行写操作(write 操作将被阻塞)
+             */
             server.aof_delayed_fsync++;
             serverLog(LL_NOTICE,"Asynchronous AOF fsync is taking too long (disk is busy?). Writing the AOF buffer without waiting for fsync to complete, this may slow down Redis.");
         }
     }
     /* We want to perform a single write. This should be guaranteed atomic
      * at least if the filesystem we are writing is a real physical one.
+     *
+     * 执行一次写入。
+     * 如果写入设备是物理的话，那么这个操作应该是原子的
+     * 
      * While this will save us against the server being killed I don't think
      * there is much to do about the whole server stopping for power problems
-     * or alike */
-
+     * or alike 
+     * 
+     * 当然出现像电源中断这类的不可抗的问题，那么 aof 文件也可能出现问题，
+     * 这时就要用 redis-check-aof 程序来进行修复
+     * 
+     * 为了确保 flush 的原子性，flush 前 sleep 一下，
+     * sleep 时间为 aof_flush_sleep 微秒
+     * */
     if (server.aof_flush_sleep && sdslen(server.aof_buf)) {
+        //usleep()函数是把调用该函数的线程挂起一段时间，单位是微秒
         usleep(server.aof_flush_sleep);
     }
 
     latencyStartMonitor(latency);
+    // 将 aof 缓冲区中的数据写入到文件
     nwritten = aofWrite(server.aof_fd,server.aof_buf,sdslen(server.aof_buf));
     latencyEndMonitor(latency);
     /* We want to capture different events for delayed writes:
+     *
+     * 捕获导致延迟写的不同事件： 
+     *
      * when the delay happens with a pending fsync, or with a saving child
      * active, and when the above two conditions are missing.
      * We also use an additional event name to save all samples which is
-     * useful for graphing / monitoring purposes. */
+     * useful for graphing / monitoring purposes. 
+     * 
+     * 当 write 的时候正在进行 fsync 操作，或者正在进行 save 操作，
+     * 除了以上两种情况外，
+     * 我们还使用一个额外的事件名称来保存所有的样本，这对于绘图/监视非常有用
+     * */
     if (sync_in_progress) {
+        // 正在进行 fsync 操作
         latencyAddSampleIfNeeded("aof-write-pending-fsync",latency);
     } else if (hasActiveChildProcess()) {
+        // 有子进程在进行 save 操作
         latencyAddSampleIfNeeded("aof-write-active-child",latency);
     } else {
         latencyAddSampleIfNeeded("aof-write-alone",latency);
@@ -416,6 +496,9 @@ void flushAppendOnlyFile(int force) {
     latencyAddSampleIfNeeded("aof-write",latency);
 
     /* We performed the write so reset the postponed flush sentinel to zero. */
+    /**
+     * 执行了 write，将延迟执行的标志位重置为 0
+     */
     server.aof_flush_postponed_start = 0;
 
     if (nwritten != (ssize_t)sdslen(server.aof_buf)) {
@@ -423,12 +506,16 @@ void flushAppendOnlyFile(int force) {
         int can_log = 0;
 
         /* Limit logging rate to 1 line per AOF_WRITE_LOG_ERROR_RATE seconds. */
+        // 将日志的纪录频率限制在每行 AOF_WRITE_LOG_ERROR_RATE 秒
         if ((server.unixtime - last_write_error_log) > AOF_WRITE_LOG_ERROR_RATE) {
             can_log = 1;
             last_write_error_log = server.unixtime;
         }
 
         /* Log the AOF write error and record the error code. */
+        /**
+         * 记录 AOF 写入错误并记录错误代码
+         */
         if (nwritten == -1) {
             if (can_log) {
                 serverLog(LL_WARNING,"Error writing to the AOF file: %s",
@@ -444,6 +531,7 @@ void flushAppendOnlyFile(int force) {
                                        (long long)sdslen(server.aof_buf));
             }
 
+            // 尝试移除新追加的不完整内容
             if (ftruncate(server.aof_fd, server.aof_current_size) == -1) {
                 if (can_log) {
                     serverLog(LL_WARNING, "Could not remove short write "
@@ -485,30 +573,46 @@ void flushAppendOnlyFile(int force) {
     } else {
         /* Successful write(2). If AOF was in error state, restore the
          * OK state and log the event. */
+        /**
+         * 写入成功，更新最后写入状态
+         */
         if (server.aof_last_write_status == C_ERR) {
             serverLog(LL_WARNING,
                 "AOF write error looks solved, Redis can write again.");
             server.aof_last_write_status = C_OK;
         }
     }
+    // aof 文件大小更新
     server.aof_current_size += nwritten;
 
     /* Re-use AOF buffer when it is small enough. The maximum comes from the
      * arena size of 4k minus some overhead (but is otherwise arbitrary). */
+    /**
+     * 当 aof 缓冲区很小时重新使用它
+     * 否则，释放 AOF 缓存。
+     */
     if ((sdslen(server.aof_buf)+sdsavail(server.aof_buf)) < 4000) {
+        // 清空 aof 缓冲区
         sdsclear(server.aof_buf);
     } else {
+        // 释放 aof 缓冲区空间
         sdsfree(server.aof_buf);
+        // 重新申请 aof 缓冲区
         server.aof_buf = sdsempty();
     }
 
 try_fsync:
     /* Don't fsync if no-appendfsync-on-rewrite is set to yes and there are
      * children doing I/O in the background. */
+    /**
+     * 如果 no-appendfsync-on-rewrite 被设置成 yes，
+     * 或者后台有子进程在进行 I/O 操作，则不进行 fsync 操作
+     */
     if (server.aof_no_fsync_on_rewrite && hasActiveChildProcess())
         return;
 
     /* Perform the fsync if needed. */
+    // 总是执行 fsync
     if (server.aof_fsync == AOF_FSYNC_ALWAYS) {
         /* redis_fsync is defined as fdatasync() for Linux in order to avoid
          * flushing metadata. */
@@ -523,14 +627,20 @@ try_fsync:
         }
         latencyEndMonitor(latency);
         latencyAddSampleIfNeeded("aof-fsync-always",latency);
+        // 已经同步到磁盘的 aof 文件大小
         server.aof_fsync_offset = server.aof_current_size;
+        // 纪录执行 fsync 操作的时间
         server.aof_last_fsync = server.unixtime;
+    // 每秒执行同步
     } else if ((server.aof_fsync == AOF_FSYNC_EVERYSEC &&
                 server.unixtime > server.aof_last_fsync)) {
         if (!sync_in_progress) {
+            // 后台执行 fsync 操作
             aof_background_fsync(server.aof_fd);
+            // 已经同步到磁盘的 aof 文件大小
             server.aof_fsync_offset = server.aof_current_size;
         }
+        // 纪录执行 fsync 操作的时间
         server.aof_last_fsync = server.unixtime;
     }
 }
@@ -1422,6 +1532,10 @@ int rewriteModuleObject(rio *r, robj *key, robj *o) {
 /* This function is called by the child rewriting the AOF file to read
  * the difference accumulated from the parent into a buffer, that is
  * concatenated at the end of the rewrite. */
+/**
+ * 该函数在子进程重写 aof 文件时被调用，
+ * 用于从父进程读取差异数据，并放入缓冲区
+ */
 ssize_t aofReadDiffFromParent(void) {
     char buf[65536]; /* Default pipe buffer size on most Linux systems. */
     ssize_t nread, total = 0;
@@ -1525,10 +1639,20 @@ werr:
 /* Write a sequence of commands able to fully rebuild the dataset into
  * "filename". Used both by REWRITEAOF and BGREWRITEAOF.
  *
+ * 将足以还原当前数据库的命令集写入到 filename 指定的文件。
+ * 这个函数被 REWRITEAOF 和 BGREWRITEAOF 两个命令调用。
+ * 
  * In order to minimize the number of commands needed in the rewritten
  * log Redis uses variadic commands when possible, such as RPUSH, SADD
  * and ZADD. However at max AOF_REWRITE_ITEMS_PER_CMD items per time
- * are inserted using a single command. */
+ * are inserted using a single command. 
+ * 
+ * 为了减少重写日志所需要的命令行数，
+ * Redis 会尽可能地使用接受可变参数数量的命令
+ * 例如 RPUSH, SADD 和 ZADD 命令
+ * 不过单个命令每次处理的元素数量不能超过 REDIS_AOF_REWRITE_ITEMS_PER_CMD
+ * 
+ * */
 int rewriteAppendOnlyFile(char *filename) {
     rio aof;
     FILE *fp = NULL;
@@ -1537,6 +1661,10 @@ int rewriteAppendOnlyFile(char *filename) {
 
     /* Note that we have to use a different temp name here compared to the
      * one used by rewriteAppendOnlyFileBackground() function. */
+    /**
+     * 注意：此处使用的临时文件名与 rewriteAppendOnlyFileBackground 
+     * 函数中使用的不一样
+     */
     snprintf(tmpfile,256,"temp-rewriteaof-%d.aof", (int) getpid());
     fp = fopen(tmpfile,"w");
     if (!fp) {
@@ -1545,8 +1673,14 @@ int rewriteAppendOnlyFile(char *filename) {
     }
 
     server.aof_child_diff = sdsempty();
+    // 初始化文件 io
     rioInitWithFile(&aof,fp);
 
+    /**
+     * 设置每写入 REDIS_AOF_AUTOSYNC_BYTES 字节
+     * 就执行一次 FSYNC 
+     * 防止缓存中积累太多命令内容，造成 I/O 阻塞时间过长
+     */
     if (server.aof_rewrite_incremental_fsync)
         rioSetAutoSync(&aof,REDIS_AUTOSYNC_BYTES);
 
@@ -1564,7 +1698,12 @@ int rewriteAppendOnlyFile(char *filename) {
 
     /* Do an initial slow fsync here while the parent is still sending
      * data, in order to make the next final fsync faster. */
+    /**
+     * 将用户态缓冲区写到内核态缓冲区
+     */
     if (fflush(fp) == EOF) goto werr;
+    // 执行 fsync 操作， fileno 获取已经打开的文件的文件描述符
+    // 将内核态缓冲区中的数据写到文件
     if (fsync(fileno(fp)) == -1) goto werr;
 
     /* Read again a few times to get more data from the parent.
@@ -1573,6 +1712,11 @@ int rewriteAppendOnlyFile(char *filename) {
      * some more data in a loop as soon as there is a good chance more data
      * will come. If it looks like we are wasting time, we abort (this
      * happens after 20 ms without new data). */
+    /**
+     * 再读几遍，从父级获取更多数据
+     * 不能永远读，因此在满足条件的情况下，尝试在一个循环中读取更多的数据
+     * 如果 20 ms 都没有新数据，则退出
+     */
     int nodata = 0;
     mstime_t start = mstime();
     while(mstime()-start < 1000 && nodata < 20) {
@@ -1587,6 +1731,9 @@ int rewriteAppendOnlyFile(char *filename) {
     }
 
     /* Ask the master to stop sending diffs. */
+    /**
+     * 请求 master 停止发送差异
+     */
     if (write(server.aof_pipe_write_ack_to_parent,"!",1) != 1) goto werr;
     if (anetNonBlock(NULL,server.aof_pipe_read_ack_from_parent) != ANET_OK)
         goto werr;
@@ -1736,15 +1883,36 @@ void aofClosePipes(void) {
 
 /* This is how rewriting of the append only file in background works:
  *
+ * 以下是后台重写 AOF 文件（BGREWRITEAOF）的工作步骤：
+ * 
  * 1) The user calls BGREWRITEAOF
+ * 
+ *    用户调用 BGREWRITEAOF 命令
+ * 
  * 2) Redis calls this function, that forks():
+ * 
+ *    Redis 调用此函数，执行 forks 操作
+ * 
  *    2a) the child rewrite the append only file in a temp file.
+ * 
+ *        子进程将 AOF 重写到临时文件
+ * 
  *    2b) the parent accumulates differences in server.aof_rewrite_buf.
+ * 
+ *        父进程将在重写这段时间内执行的命令纪录到 server.aof_rewrite_buf 中
+ * 
  * 3) When the child finished '2a' exists.
+ * 
+ *    当步骤 2a 执行完之后，子进程结束
+ * 
  * 4) The parent will trap the exit code, if it's OK, will append the
  *    data accumulated into server.aof_rewrite_buf into the temp file, and
  *    finally will rename(2) the temp file in the actual file name.
  *    The the new file is reopened as the new append only file. Profit!
+ *    
+ *    父进程捕获子进程退出信号，如果收到的退出信号是 OK，
+ *    将在 server.aof_rewrite_buf 缓冲区中的内容写入到临时文件
+ *    并重命名临时文件，用这个新文件替换旧的 AOF 文件，并重新打开它
  */
 int rewriteAppendOnlyFileBackground(void) {
     pid_t childpid;
@@ -1755,8 +1923,10 @@ int rewriteAppendOnlyFileBackground(void) {
         char tmpfile[256];
 
         /* Child */
+        // 设置子进程名字
         redisSetProcTitle("redis-aof-rewrite");
         redisSetCpuAffinity(server.aof_rewrite_cpulist);
+        // 创建临时文件，并进行 AOF 重写
         snprintf(tmpfile,256,"temp-rewriteaof-bg-%d.aof", (int) getpid());
         if (rewriteAppendOnlyFile(tmpfile) == C_OK) {
             sendChildCowInfo(CHILD_INFO_TYPE_AOF_COW_SIZE, "AOF rewrite");

@@ -40,6 +40,10 @@ int clientSubscriptionsCount(client *c);
  * message. However if the caller sets 'msg' as NULL, it will be able
  * to send a special message (for instance an Array type) by using the
  * addReply*() API family. */
+/**
+ * 向客户端发送类型为 “message” 的 pubsub 消息
+ * msg 参数是一个 redis 对象，包含消息发送的字符串
+ */
 void addReplyPubsubMessage(client *c, robj *channel, robj *msg) {
     if (c->resp == 2)
         addReply(c,shared.mbulkhdr[3]);
@@ -53,6 +57,11 @@ void addReplyPubsubMessage(client *c, robj *channel, robj *msg) {
 /* Send a pubsub message of type "pmessage" to the client. The difference
  * with the "message" type delivered by addReplyPubsubMessage() is that
  * this message format also includes the pattern that matched the message. */
+/**
+ * 向客户端发送类型为 “pmessage” 的 pubsub 消息
+ * 与 addreplypusubmessage() 传递的 “message” 类型的区别在于
+ * 消息格式中包含这匹配模式
+ */
 void addReplyPubsubPatMessage(client *c, robj *pat, robj *channel, robj *msg) {
     if (c->resp == 2)
         addReply(c,shared.mbulkhdr[4]);
@@ -285,6 +294,13 @@ int pubsubUnsubscribeAllPatterns(client *c, int notify) {
 }
 
 /* Publish a message */
+/**
+ * 发布消息 message 到订阅频道 channel 的客户端
+ * 或 
+ * 发布消息 message 到订阅与频道 channel 模式匹配的所有客户端
+ * channel 频道
+ * message 消息
+ */
 int pubsubPublishMessage(robj *channel, robj *message) {
     int receivers = 0;
     dictEntry *de;
@@ -293,6 +309,8 @@ int pubsubPublishMessage(robj *channel, robj *message) {
     listIter li;
 
     /* Send to clients listening for that channel */
+    // 发送给监听该频道的客户端
+    // 获取订阅了该频道的客户端
     de = dictFind(server.pubsub_channels,channel);
     if (de) {
         list *list = dictGetVal(de);
@@ -307,6 +325,8 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         }
     }
     /* Send to clients listening to matching channels */
+    // 遍历 pubsub_patterns 列表，取出与频道匹配的列表节点，
+    // 获取列表节点保存的客户端，给客户端发送订阅消息
     di = dictGetIterator(server.pubsub_patterns);
     if (di) {
         channel = getDecodedObject(channel);

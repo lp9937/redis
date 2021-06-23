@@ -1122,6 +1122,12 @@ int ACLAuthenticateUser(client *c, robj *username, robj *password) {
  * creates such an ID: it uses sequential IDs, reusing the same ID for the same
  * command name, so that a command retains the same ID in case of modules that
  * are unloaded and later reloaded. */
+/**
+ * 为了 ACL 的目的，每个用户都有一个命令位图，该位图包含了用户允许执行的命令。
+ * 为了填充位图，需要给每个命令分配一个 ID。
+ * 该函数创建 ID 的方式如下：使用顺序递增的方式，相同命令名使用同一个 ID。
+ * 因此在模块卸载又重新加载后，相同命令的 ID 保持不变。
+ */
 unsigned long ACLGetCommandID(const char *cmdname) {
 
     sds lowername = sdsnew(cmdname);
@@ -1173,21 +1179,39 @@ user *ACLGetUserByName(const char *name, size_t namelen) {
  * command cannot be executed because the user is not allowed to run such
  * command, the second if the command is denied because the user is trying
  * to access keys that are not among the specified patterns. */
+/**
+ * 通过判断命令是否被 c->cmd 引用，以及根据 c->user 与 ACL 之间的关系
+ * 来判断命令是否准备好在客户端 “c” 中执行
+ * 
+ * 如果用户能够执行这个命令，返回 ACL_OK
+ * 否则返回 ACL_DENIED_CMD 或 ACL_DENIED_KEY
+ * 如果用户不被允许执行该命令，则返回 ACL_DENIED_CMD
+ * 如果用户访问的键不在指定模式中，在返回 ACL_DENIED_KEY
+ */
 int ACLCheckCommandPerm(client *c, int *keyidxptr) {
+    // 用户
     user *u = c->user;
+    // 命令 ID
     uint64_t id = c->cmd->id;
 
     /* If there is no associated user, the connection can run anything. */
+    // 如果没有关联的用户，则连接可以运行任何操作
     if (u == NULL) return ACL_OK;
 
     /* Check if the user can execute this command. */
+    // 如果用户不能执行所有命令，且命令不是 authCommand，
+    // 则在 ACL 列表中判断用户是否能指向这个命令
     if (!(u->flags & USER_FLAG_ALLCOMMANDS) &&
         c->cmd->proc != authCommand)
     {
         /* If the bit is not set we have to check further, in case the
          * command is allowed just with that specific subcommand. */
+        /**
+         * 如果位没有被设置，将进一步判断该命令是否与特定子命令一起的
+         */
         if (ACLGetUserCommandBit(u,id) == 0) {
             /* Check if the subcommand matches. */
+            // 检查是否有与之匹配的子命令
             if (c->argc < 2 ||
                 u->allowed_subcommands == NULL ||
                 u->allowed_subcommands[id] == NULL)
@@ -1209,6 +1233,9 @@ int ACLCheckCommandPerm(client *c, int *keyidxptr) {
 
     /* Check if the user can execute commands explicitly touching the keys
      * mentioned in the command arguments. */
+    /**
+     * 检查用户是否可以显式地触摸命令参数中提到的键来执行命令
+     */
     if (!(c->user->flags & USER_FLAG_ALLKEYS) &&
         (c->cmd->getkeys_proc || c->cmd->firstkey))
     {

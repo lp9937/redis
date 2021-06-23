@@ -391,6 +391,11 @@ void decrRefCount(robj *o) {
     }
 }
 
+robj *resetRefCount(robj *obj) {
+    obj->refcount = 0;
+    return obj;
+}
+
 /* This variant of decrRefCount() gets its argument as void, and is useful
  * as free method in data structures that expect a 'void free_object(void*)'
  * prototype for the free method. */
@@ -677,16 +682,29 @@ int getLongDoubleFromObjectOrReply(client *c, robj *o, long double *target, cons
     *target = value;
     return C_OK;
 }
-
+/**
+ * 尝试从对象 o 中取出整数值
+ * 或尝试将对象 o 中的值转换为整数值
+ * 并将这个整数值保存到 *target
+ * 
+ * 如果 o 为 NULL，则将 *target 设置为 0
+ * 确保对象 o 的类型为 OBJ_STRING，再判断编码类型。
+ * 如果编码为 OBJ_ENCODING_RAW 或 OBJ_ENCODING_EMBSTR，则尝试将值转换为整数
+ * 如果编码为 OBJ_ENCODING_INT，则直接取出对象的值
+ */
 int getLongLongFromObject(robj *o, long long *target) {
     long long value;
 
     if (o == NULL) {
         value = 0;
     } else {
+        // 确保对象是 OBJ_STRING 类型
         serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
+        // 编码类型为 OBJ_ENCODING_RAW 或 OBJ_ENCODING_EMBSTR
         if (sdsEncodedObject(o)) {
+            // 将字符串对象中的值转换为整数
             if (string2ll(o->ptr,sdslen(o->ptr),&value) == 0) return C_ERR;
+        // 编码类型为 OBJ_ENCODING_INT
         } else if (o->encoding == OBJ_ENCODING_INT) {
             value = (long)o->ptr;
         } else {
@@ -696,10 +714,19 @@ int getLongLongFromObject(robj *o, long long *target) {
     if (target) *target = value;
     return C_OK;
 }
-
+/**
+ * 尝试从对象 o 中取出整数值
+ * 或尝试将对象 o 中的值转换为整数值
+ * 并将这个整数值保存到 *target
+ * 
+ * 如果取出或转换成功，则返回 C_OK
+ * 否则返回 C_ERR，并向客户端回复错误信息
+ */
 int getLongLongFromObjectOrReply(client *c, robj *o, long long *target, const char *msg) {
     long long value;
+    
     if (getLongLongFromObject(o, &value) != C_OK) {
+        // 转换或取值不成功，向客户端发送错误信息，并返回 C_ERR
         if (msg != NULL) {
             addReplyError(c,(char*)msg);
         } else {

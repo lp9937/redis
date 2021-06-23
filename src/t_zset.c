@@ -68,6 +68,10 @@ int zslLexValueLteMax(sds value, zlexrangespec *spec);
 
 /* Create a skiplist node with the specified number of levels.
  * The SDS string 'ele' is referenced by the node after the call. */
+/* 创建一个层数为 level 的跳跃表节点
+ * 并将节点ele属性设置为ele，分值设置为 score
+ * 返回值为新创建的跳跃表节点 
+ */
 zskiplistNode *zslCreateNode(int level, double score, sds ele) {
     zskiplistNode *zn =
         zmalloc(sizeof(*zn)+level*sizeof(struct zskiplistLevel));
@@ -77,13 +81,18 @@ zskiplistNode *zslCreateNode(int level, double score, sds ele) {
 }
 
 /* Create a new skiplist. */
+/*创建一个跳跃表*/
 zskiplist *zslCreate(void) {
     int j;
     zskiplist *zsl;
-
+    //分配内存空间
     zsl = zmalloc(sizeof(*zsl));
+
+    //设置层数
     zsl->level = 1;
+    //节点数量
     zsl->length = 0;
+    //初始化表头指针，指向一个32层的节点
     zsl->header = zslCreateNode(ZSKIPLIST_MAXLEVEL,0,NULL);
     for (j = 0; j < ZSKIPLIST_MAXLEVEL; j++) {
         zsl->header->level[j].forward = NULL;
@@ -97,21 +106,31 @@ zskiplist *zslCreate(void) {
 /* Free the specified skiplist node. The referenced SDS string representation
  * of the element is freed too, unless node->ele is set to NULL before calling
  * this function. */
+/*
+ * 释放给定跳跃表节点
+ */
 void zslFreeNode(zskiplistNode *node) {
     sdsfree(node->ele);
     zfree(node);
 }
 
 /* Free a whole skiplist. */
+/*
+ *  释放给定跳跃表，以及表中所有跳跃表节点
+ *  T=O(n)
+ */
 void zslFree(zskiplist *zsl) {
     zskiplistNode *node = zsl->header->level[0].forward, *next;
 
+    //释放表头节点
     zfree(zsl->header);
+    //释放表中所有节点
     while(node) {
         next = node->level[0].forward;
         zslFreeNode(node);
         node = next;
     }
+    //释放跳跃表结构
     zfree(zsl);
 }
 
@@ -119,6 +138,11 @@ void zslFree(zskiplist *zsl) {
  * The return value of this function is between 1 and ZSKIPLIST_MAXLEVEL
  * (both inclusive), with a powerlaw-alike distribution where higher
  * levels are less likely to be returned. */
+/*
+ * 返回一个随机值，用于新跳跃表节点的层数
+ * 随机值介于 1 和 ZSKIPLIST_MAXLEVEL 之间(包含 ZSKIPLIST_MAXLEVEL)
+ * 根据随机算法的幂次分布，越大的值生成的概率越小
+ */
 int zslRandomLevel(void) {
     int level = 1;
     while ((random()&0xFFFF) < (ZSKIPLIST_P * 0xFFFF))
@@ -129,82 +153,130 @@ int zslRandomLevel(void) {
 /* Insert a new node in the skiplist. Assumes the element does not already
  * exist (up to the caller to enforce that). The skiplist takes ownership
  * of the passed SDS string 'ele'. */
+/**
+ * 创建一个分支为score，成员为ele的新节点
+ * 并将这个新节点插入到跳跃表zsl中
+ * 返回新创建的节点
+ * T_worst=O(N) T_avg=O(log N)
+ */
 zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) {
     zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     unsigned int rank[ZSKIPLIST_MAXLEVEL];
     int i, level;
 
     serverAssert(!isnan(score));
+    //在各个层查找结点的插入位置
     x = zsl->header;
     for (i = zsl->level-1; i >= 0; i--) {
         /* store rank that is crossed to reach the insert position */
+        // 如果 i 不是 zsl->level-1 层，那么 i 层的起始 rank 值为 i+1 层的 rank 值
+        // 各个层的 rank 值一层层累积
+        // 最终 rank[0] 的值加 1 就是新节点的前置节点的排位
+        // rank[0] 会在后面成为计算 span 值和 rank 值得基础
         rank[i] = i == (zsl->level-1) ? 0 : rank[i+1];
+
+        //沿着前进指针遍历跳跃表
         while (x->level[i].forward &&
                 (x->level[i].forward->score < score ||
                     (x->level[i].forward->score == score &&
                     sdscmp(x->level[i].forward->ele,ele) < 0)))
         {
+            // 纪录沿途跨越了多少个节点
             rank[i] += x->level[i].span;
+
+            // 移动到下一个指针
             x = x->level[i].forward;
         }
+        // 纪录沿途节点
         update[i] = x;
     }
     /* we assume the element is not already inside, since we allow duplicated
      * scores, reinserting the same element should never happen since the
      * caller of zslInsert() should test in the hash table if the element is
      * already inside or not. */
+    // zslInsert() 的调用者会确保同分值且同成员的元素不会出现，
+    // 所以这里不需要进一步检查，可以直接创建新元素
+
+    // 获取一个随机值作为新节点的层数
     level = zslRandomLevel();
+    // 如果新节点的层数比其它节点的层数都要大
+    // 则初始化表头节点中未使用的层，并将它们纪录到 update 数组中
     if (level > zsl->level) {
+        // 初始化未使用的层
         for (i = zsl->level; i < level; i++) {
             rank[i] = 0;
             update[i] = zsl->header;
             update[i]->level[i].span = zsl->length;
         }
+        // 更新跳跃表层数
         zsl->level = level;
     }
+    // 创建新节点
     x = zslCreateNode(level,score,ele);
+
+    // 将新节点的 forward 指向 update 中纪录的节点的 forward 所指向的节点
+    // 将 update 中纪录的节点的 forward 指向 x
     for (i = 0; i < level; i++) {
         x->level[i].forward = update[i]->level[i].forward;
         update[i]->level[i].forward = x;
 
         /* update span covered by update[i] as x is inserted here */
+        // 计算新节点 i 层跳跃的节点数量
         x->level[i].span = update[i]->level[i].span - (rank[0] - rank[i]);
+        // 新节点插入后，更新新节点前一个节点 i 层的 span
         update[i]->level[i].span = (rank[0] - rank[i]) + 1;
     }
 
     /* increment span for untouched levels */
+    // 未接触的节点的 span 值也需要增一，这些节点直接从表头指向新节点
     for (i = level; i < zsl->level; i++) {
         update[i]->level[i].span++;
     }
 
+    // 设置新节点的后退指针
     x->backward = (update[0] == zsl->header) ? NULL : update[0];
     if (x->level[0].forward)
         x->level[0].forward->backward = x;
     else
         zsl->tail = x;
+    // 跳跃表的节点数增 1
     zsl->length++;
     return x;
 }
 
 /* Internal function used by zslDelete, zslDeleteRangeByScore and
  * zslDeleteRangeByRank. */
+/**
+ * 内部删除函数，被 zslDelete、zslDeleteRangeByScore、zslDeleteRangeByRank 函数调用
+ * 注意：该函数不释放被删除节点 x 的内存空间
+ */
 void zslDeleteNode(zskiplist *zsl, zskiplistNode *x, zskiplistNode **update) {
     int i;
+    // 更新所有与被删除节点 x 有关的节点的指针和跨度，解除它们之间的关系
     for (i = 0; i < zsl->level; i++) {
+        // 直接与被删除节点 x 相关联的
         if (update[i]->level[i].forward == x) {
             update[i]->level[i].span += x->level[i].span - 1;
             update[i]->level[i].forward = x->level[i].forward;
         } else {
+            // 间接与被删除节点 x 相关联的
             update[i]->level[i].span -= 1;
         }
     }
+    
     if (x->level[0].forward) {
+        // 更新与被删除节点 x 关联的前进节点的后退指针
         x->level[0].forward->backward = x->backward;
     } else {
+        // 更新跳跃表的尾指针
         zsl->tail = x->backward;
     }
+
+    // 更新跳跃表最大层数(只有被删除节点是跳跃表中层数最多的节点时才执行)
     while(zsl->level > 1 && zsl->header->level[zsl->level-1].forward == NULL)
         zsl->level--;
+
+    // 跳跃表节点数减 1
     zsl->length--;
 }
 
@@ -216,11 +288,18 @@ void zslDeleteNode(zskiplist *zsl, zskiplistNode *x, zskiplistNode **update) {
  * it is not freed (but just unlinked) and *node is set to the node pointer,
  * so that it is possible for the caller to reuse the node (including the
  * referenced SDS string at node->ele). */
+/**
+ * 如果在跳跃表中存在 score 相等且 ele 相同的跳跃表节点，则从跳跃表中删除该节点，并返回 1
+ * 否则返回 0
+ * 如果参数 node 是空，则通过 zslFreeNode() 函数来释放被删除节点的内存空间
+ * 否则通过参数 node 将被删除节点返回给函数调用者
+ */
 int zslDelete(zskiplist *zsl, double score, sds ele, zskiplistNode **node) {
     zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     int i;
 
     x = zsl->header;
+    //沿着前进指针遍历跳跃表
     for (i = zsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
                 (x->level[i].forward->score < score ||
@@ -229,19 +308,24 @@ int zslDelete(zskiplist *zsl, double score, sds ele, zskiplistNode **node) {
         {
             x = x->level[i].forward;
         }
+        // 纪录沿途节点
         update[i] = x;
     }
     /* We may have multiple elements with the same score, what we need
      * is to find the element with both the right score and object. */
+    // 检查找到的 x 节点，只有它的 score 和 ele 与给定的 score 和 ele 都相同时，才删除该节点
     x = x->level[0].forward;
     if (x && score == x->score && sdscmp(x->ele,ele) == 0) {
         zslDeleteNode(zsl, x, update);
+        // node 为空，释放被删除节点 x 的内存空间
         if (!node)
             zslFreeNode(x);
         else
+            // 返回被删除节点 x 给函数调用者
             *node = x;
         return 1;
     }
+    // 跳跃表不包含这样的节点，返回 0
     return 0; /* not found */
 }
 
@@ -256,6 +340,14 @@ int zslDelete(zskiplist *zsl, double score, sds ele, zskiplistNode **node) {
  * element, which is more costly.
  *
  * The function returns the updated element skiplist node pointer. */
+/**
+ * 更新跳跃表中一个跳跃节点的分数
+ * 注意：调用该函数时，跳跃表中一定存在这个跳跃节点，且它的分数和 curscore 相等
+ *       该函数不会更新哈希表中的 score
+ * 
+ *       跳跃节点分数更新后，如果需要调整节点位置时，程序通过移除和添加新节点的方式来修改跳跃表
+ * 
+ */
 zskiplistNode *zslUpdateScore(zskiplist *zsl, double curscore, sds ele, double newscore) {
     zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     int i;
@@ -263,6 +355,7 @@ zskiplistNode *zslUpdateScore(zskiplist *zsl, double curscore, sds ele, double n
     /* We need to seek to element to update to start: this is useful anyway,
      * we'll have to update or remove it. */
     x = zsl->header;
+    //沿着前进指针遍历跳跃表
     for (i = zsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
                 (x->level[i].forward->score < curscore ||
@@ -271,17 +364,23 @@ zskiplistNode *zslUpdateScore(zskiplist *zsl, double curscore, sds ele, double n
         {
             x = x->level[i].forward;
         }
+        // 纪录沿途节点
         update[i] = x;
     }
 
     /* Jump to our element: note that this function assumes that the
      * element with the matching score exists. */
+    // 注意，函数调用者已经确定在调用该函数时，
+    // 跳跃表中存在有分数相同且元素相同的节点 x
     x = x->level[0].forward;
     serverAssert(x && curscore == x->score && sdscmp(x->ele,ele) == 0);
 
     /* If the node, after the score update, would be still exactly
      * at the same position, we can just update the score without
      * actually removing and re-inserting the element in the skiplist. */
+    // 如果节点分数更新后，节点任然处于相同位置，则直接更新节点 x 的分数并返回节点 x
+    // x 的后节点为空或后节点的分数小于 newscore 且 x 的前节点为空或前节点的分数比 newscore 大
+    // 则分数更新后节点为置不变，直接更新节点 x 的分数并返回 x
     if ((x->backward == NULL || x->backward->score < newscore) &&
         (x->level[0].forward == NULL || x->level[0].forward->score > newscore))
     {
@@ -291,35 +390,56 @@ zskiplistNode *zslUpdateScore(zskiplist *zsl, double curscore, sds ele, double n
 
     /* No way to reuse the old node: we need to remove and insert a new
      * one at a different place. */
+    // 由于无法重用旧节点 x，需要删除旧节点 x
     zslDeleteNode(zsl, x, update);
+    // 在不同位置插入分数为 newscore 的新节点，注意这里重用了旧节点 x 的 ele
     zskiplistNode *newnode = zslInsert(zsl,newscore,x->ele);
     /* We reused the old node x->ele SDS string, free the node now
      * since zslInsert created a new one. */
+    // 释放旧节点 x 除了 ele 外的内存空间
     x->ele = NULL;
     zslFreeNode(x);
+    // 返回新插入的节点
     return newnode;
 }
 
+/**
+ * 检测给定值 value 是否大于（或大于等于）范围 spec 中的 min 项。
+ * 返回 1 表示 value 大于(或大于等于) min 项，否则返回 0 
+ */
 int zslValueGteMin(double value, zrangespec *spec) {
     return spec->minex ? (value > spec->min) : (value >= spec->min);
 }
 
+/**
+ * 检测给定值 value 是否小于（或小于等于）范围 spec 中的 max 项。
+ * 返回 1 表示 value 小于(或小于等于) max 项，否则返回 0 
+ */
 int zslValueLteMax(double value, zrangespec *spec) {
     return spec->maxex ? (value < spec->max) : (value <= spec->max);
 }
 
 /* Returns if there is a part of the zset is in range. */
+/**
+ * 如果给定范围的分值包含在跳跃表的分值范围内
+ * 则返回 1，否则返回 0
+ */
 int zslIsInRange(zskiplist *zsl, zrangespec *range) {
     zskiplistNode *x;
 
     /* Test for ranges that will always be empty. */
+    // 判断范围值为空的情况
+    // 1.最小值大于最大值
+    // 2.最小值和最大值相同，且不包含最小值或最大值
     if (range->min > range->max ||
             (range->min == range->max && (range->minex || range->maxex)))
         return 0;
     x = zsl->tail;
+    // 跳跃表不包含任何节点或节点最大值比范围中的最小值小
     if (x == NULL || !zslValueGteMin(x->score,range))
         return 0;
     x = zsl->header->level[0].forward;
+    // 跳跃表不包含任何节点或节点最小值比范围中的最大值大
     if (x == NULL || !zslValueLteMax(x->score,range))
         return 0;
     return 1;
@@ -327,16 +447,22 @@ int zslIsInRange(zskiplist *zsl, zrangespec *range) {
 
 /* Find the first node that is contained in the specified range.
  * Returns NULL when no element is contained in the range. */
+/**
+ * 返回跳跃表中第一个分值在 range 范围内的节点
+ * 如果跳跃表中没有符合范围的节点，返回 NULL
+ */
 zskiplistNode *zslFirstInRange(zskiplist *zsl, zrangespec *range) {
     zskiplistNode *x;
     int i;
 
     /* If everything is out of range, return early. */
+    // 如果跳跃表中所有节点都不在 range 范围内，直接返回 NULL
     if (!zslIsInRange(zsl,range)) return NULL;
 
     x = zsl->header;
     for (i = zsl->level-1; i >= 0; i--) {
         /* Go forward while *OUT* of range. */
+        // 沿着前进指针遍历跳跃表，直到找到某个节点值大于(或大于等于) range 范围内的 min
         while (x->level[i].forward &&
             !zslValueGteMin(x->level[i].forward->score,range))
                 x = x->level[i].forward;
@@ -347,22 +473,30 @@ zskiplistNode *zslFirstInRange(zskiplist *zsl, zrangespec *range) {
     serverAssert(x != NULL);
 
     /* Check if score <= max. */
+    // 检查节点 x 的 score 是否小于(或小于等于) range 范围内的 max
     if (!zslValueLteMax(x->score,range)) return NULL;
     return x;
 }
 
 /* Find the last node that is contained in the specified range.
  * Returns NULL when no element is contained in the range. */
+/**
+ * 返回跳跃表中最后一个分值在 range 范围内的节点
+ * 如果跳跃表中没有符合范围的节点，返回 NULL
+ */
 zskiplistNode *zslLastInRange(zskiplist *zsl, zrangespec *range) {
     zskiplistNode *x;
     int i;
 
     /* If everything is out of range, return early. */
+    // 如果跳跃表中所有节点都不在 range 返回内，返回 NULL
     if (!zslIsInRange(zsl,range)) return NULL;
 
     x = zsl->header;
     for (i = zsl->level-1; i >= 0; i--) {
         /* Go forward while *IN* range. */
+        // 沿着前进指针遍历跳跃表，直到找到节点 x，x 满足 x->score 比 range 范围内的 max 小(或小于等于)，
+        // x->level[i].forward->score 比 range 范围内的 max 大于等于(或大)
         while (x->level[i].forward &&
             zslValueLteMax(x->level[i].forward->score,range))
                 x = x->level[i].forward;
@@ -372,6 +506,7 @@ zskiplistNode *zslLastInRange(zskiplist *zsl, zrangespec *range) {
     serverAssert(x != NULL);
 
     /* Check if score >= min. */
+    // 检查节点 x 的 score 是否大于(或大于等) range 范围内的 min
     if (!zslValueGteMin(x->score,range)) return NULL;
     return x;
 }
@@ -381,17 +516,26 @@ zskiplistNode *zslLastInRange(zskiplist *zsl, zrangespec *range) {
  * range->maxex). When inclusive a score >= min && score <= max is deleted.
  * Note that this function takes the reference to the hash table view of the
  * sorted set, in order to remove the elements from the hash table too. */
+/**
+ * 从跳跃表中删除 score 在 range 范围内的所有节点
+ * 注意：不仅会从跳跃表中删除满足条件的节点，还会从相应的字典根据满足条件的键删除节点
+ * 返回被删除节点的数量
+ */
 unsigned long zslDeleteRangeByScore(zskiplist *zsl, zrangespec *range, dict *dict) {
     zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     unsigned long removed = 0;
     int i;
 
     x = zsl->header;
+    // 沿着前进指针遍历跳跃表，并记录沿途的节点
     for (i = zsl->level-1; i >= 0; i--) {
+        // 沿着前进指针，直到找打第一个 x->level[i].forward 不为空
+        // 且 x->level[i].forward->score 大于(或大于等于) range 范围内 min 的节点
         while (x->level[i].forward && (range->minex ?
             x->level[i].forward->score <= range->min :
             x->level[i].forward->score < range->min))
                 x = x->level[i].forward;
+        // 纪录沿途遍历的节点
         update[i] = x;
     }
 
@@ -399,30 +543,42 @@ unsigned long zslDeleteRangeByScore(zskiplist *zsl, zrangespec *range, dict *dic
     x = x->level[0].forward;
 
     /* Delete nodes while in range. */
+    // 当前结点 x 是第一个大于(或大于等于) range 范围内 min 的节点
+    // 沿着 x 节点的前进指针，将所有 score 小于(或小于等于) range 范围内 max 的节点
+    // 从压缩列表或字典中删除  
     while (x &&
            (range->maxex ? x->score < range->max : x->score <= range->max))
     {
         zskiplistNode *next = x->level[0].forward;
+        // 从压缩列表中删除节点 x
         zslDeleteNode(zsl,x,update);
+        // 从字典中删除键为 x->ele 的节点
         dictDelete(dict,x->ele);
+        // 释放压缩列表节点 x 的内存空间
         zslFreeNode(x); /* Here is where x->ele is actually released. */
         removed++;
         x = next;
     }
     return removed;
 }
-
+/**
+ * 从跳跃表中删除 ele 在 range 范围内的所有节点
+ * 注意：不仅会从跳跃表中删除满足条件的节点，还会从相应的字典中根据满足条件的键删除节点
+ */
 unsigned long zslDeleteRangeByLex(zskiplist *zsl, zlexrangespec *range, dict *dict) {
     zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     unsigned long removed = 0;
     int i;
 
-
     x = zsl->header;
+    // 沿着前进指针遍历跳跃表，并记录沿途的节点
     for (i = zsl->level-1; i >= 0; i--) {
+        // 沿着前进指针，直到找到第一个 x->level[i].forward 不为空且
+        // x->level[i].forward->ele 大于(大于等于) range 范围内 min 的节点
         while (x->level[i].forward &&
             !zslLexValueGteMin(x->level[i].forward->ele,range))
                 x = x->level[i].forward;
+        // 纪录沿途遍历节点
         update[i] = x;
     }
 
@@ -430,10 +586,16 @@ unsigned long zslDeleteRangeByLex(zskiplist *zsl, zlexrangespec *range, dict *di
     x = x->level[0].forward;
 
     /* Delete nodes while in range. */
+    // 当前结点 x 是第一个大于(或大于等于) range 范围内 min 的节点
+    // 沿着 x 节点的前进指针，将所有 ele 小于(或小于等于) range 范围内 max 的节点
+    // 从压缩列表或字典中删除  
     while (x && zslLexValueLteMax(x->ele,range)) {
         zskiplistNode *next = x->level[0].forward;
+        // 从压缩列表中删除
         zslDeleteNode(zsl,x,update);
+        // 根据键从字典中删除
         dictDelete(dict,x->ele);
+        // 释放节点内存空间
         zslFreeNode(x); /* Here is where x->ele is actually released. */
         removed++;
         x = next;
@@ -443,12 +605,21 @@ unsigned long zslDeleteRangeByLex(zskiplist *zsl, zlexrangespec *range, dict *di
 
 /* Delete all the elements with rank between start and end from the skiplist.
  * Start and end are inclusive. Note that start and end need to be 1-based */
+/**
+ * 从跳跃表中删除所有排在 start 和 end 之间的节点
+ * start 和 end 两个位置都是包含在内的。
+ * 注意 start 和 end 都是以 1 为起始值
+ * 返回被删除节点的数量
+ */
 unsigned long zslDeleteRangeByRank(zskiplist *zsl, unsigned int start, unsigned int end, dict *dict) {
     zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     unsigned long traversed = 0, removed = 0;
     int i;
 
     x = zsl->header;
+    // 沿着前进指针遍历跳跃表，并记录沿途节点
+    // 只要节点位置小于 start，则向前移动指针
+    // 否则纪录当前结点，并移动到当前结点的下一层
     for (i = zsl->level-1; i >= 0; i--) {
         while (x->level[i].forward && (traversed + x->level[i].span) < start) {
             traversed += x->level[i].span;
@@ -457,8 +628,11 @@ unsigned long zslDeleteRangeByRank(zskiplist *zsl, unsigned int start, unsigned 
         update[i] = x;
     }
 
+    // (traversed++) = start
     traversed++;
+    // x 为排在 start 位置的节点
     x = x->level[0].forward;
+    // 删除所有排在 start 和 end 之间的节点，包含 start 和 end
     while (x && traversed <= end) {
         zskiplistNode *next = x->level[0].forward;
         zslDeleteNode(zsl,x,update);
@@ -475,12 +649,19 @@ unsigned long zslDeleteRangeByRank(zskiplist *zsl, unsigned int start, unsigned 
  * Returns 0 when the element cannot be found, rank otherwise.
  * Note that the rank is 1-based due to the span of zsl->header to the
  * first element. */
+/**
+ * 根据 score 和 key 查找节点在跳跃表中的位置
+ * 如果节点不存在，返回 0
+ * 否则返回节点的位置
+ * 注意：节点位置是以 1 为起始值
+ */
 unsigned long zslGetRank(zskiplist *zsl, double score, sds ele) {
     zskiplistNode *x;
     unsigned long rank = 0;
     int i;
 
     x = zsl->header;
+    // 沿着前进指针遍历跳跃表
     for (i = zsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
             (x->level[i].forward->score < score ||
@@ -499,6 +680,10 @@ unsigned long zslGetRank(zskiplist *zsl, double score, sds ele) {
 }
 
 /* Finds an element by its rank. The rank argument needs to be 1-based. */
+/**
+ * 根据排列位置 rank 获取跳跃表中的节点
+ * rank 是以 1 为起始位置
+ */
 zskiplistNode* zslGetElementByRank(zskiplist *zsl, unsigned long rank) {
     zskiplistNode *x;
     unsigned long traversed = 0;
@@ -519,8 +704,12 @@ zskiplistNode* zslGetElementByRank(zskiplist *zsl, unsigned long rank) {
 }
 
 /* Populate the rangespec according to the objects min and max. */
+/**
+ * 将 min 和 max 转化为区间，并将其保存在 spec 中
+ */ 
 static int zslParseRange(robj *min, robj *max, zrangespec *spec) {
     char *eptr;
+    // 默认为闭区间
     spec->minex = spec->maxex = 0;
 
     /* Parse the min-max interval. If one of the values is prefixed
@@ -528,11 +717,15 @@ static int zslParseRange(robj *min, robj *max, zrangespec *spec) {
      * ZRANGEBYSCORE zset (1.5 (2.5 will match min < x < max
      * ZRANGEBYSCORE zset 1.5 2.5 will instead match min <= x <= max */
     if (min->encoding == OBJ_ENCODING_INT) {
+        // min 为整数，闭区间
         spec->min = (long)min->ptr;
     } else {
+        // min 为对象字符串，且以字符 ‘(’ 开始
         if (((char*)min->ptr)[0] == '(') {
+            // 将字符串转化为浮点数，闭区间
             spec->min = strtod((char*)min->ptr+1,&eptr);
             if (eptr[0] != '\0' || isnan(spec->min)) return C_ERR;
+            // 开区间
             spec->minex = 1;
         } else {
             spec->min = strtod((char*)min->ptr,&eptr);
@@ -540,13 +733,18 @@ static int zslParseRange(robj *min, robj *max, zrangespec *spec) {
         }
     }
     if (max->encoding == OBJ_ENCODING_INT) {
+        // max 为整数，闭区间
         spec->max = (long)max->ptr;
     } else {
+        // max 为对象字符串，且以字符 ‘(’ 开始
         if (((char*)max->ptr)[0] == '(') {
+            // 将字符串转化为浮点数
             spec->max = strtod((char*)max->ptr+1,&eptr);
             if (eptr[0] != '\0' || isnan(spec->max)) return C_ERR;
+            // 开区间
             spec->maxex = 1;
         } else {
+            // 将字符串转化为浮点数，闭区间
             spec->max = strtod((char*)max->ptr,&eptr);
             if (eptr[0] != '\0' || isnan(spec->max)) return C_ERR;
         }

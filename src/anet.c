@@ -471,12 +471,24 @@ int anetWrite(int fd, char *buf, int count)
 }
 
 static int anetListen(char *err, int s, struct sockaddr *sa, socklen_t len, int backlog) {
+    
+    /**
+     * int bind(SOCKET socket, const struct sockaddr* address, socklen_t address_len)
+     * socket:套接字描述符
+     * address:sockaddr 结构体指针，其中包含了要结合的地址和端口号
+     * address_len:确定 address 缓冲区的长度
+     */
     if (bind(s,sa,len) == -1) {
         anetSetError(err, "bind: %s", strerror(errno));
         close(s);
         return ANET_ERR;
     }
-
+    /**
+     * 创建一个套接口并监听申请的连接
+     * int listen(int sockfd,int backlog)
+     * sockfd:用于标识一个已捆绑未连接套接口的描述字
+     * backlog:等待连接队列的最大长度
+     */
     if (listen(s, backlog) == -1) {
         anetSetError(err, "listen: %s", strerror(errno));
         close(s);
@@ -515,6 +527,16 @@ static int _anetTcpServer(char *err, int port, char *bindaddr, int af, int backl
         return ANET_ERR;
     }
     for (p = servinfo; p != NULL; p = p->ai_next) {
+        /**
+         * 创建套接字，返回套接字描述符
+         * int socket(int domain, int type, int protocol);
+         * domain:协议域，又称协议族(family), AF_INET、AF_INET6、
+         *        AF_LOCAL、AF_ROUTE等
+         * type:指定 socket 类型，常用类型有 SOCK_STREAM、SOCK_DGRAM、
+         *      SOCK_RAW、SOCK_PACKET、SOCK_SEQPACKET等
+         * protocol:指定协议, TCP 传输协议、UDP 传输协议、STCP 传输协议、
+         *          TIPC 传输协议
+         */
         if ((s = socket(p->ai_family,p->ai_socktype,p->ai_protocol)) == -1)
             continue;
 
@@ -563,10 +585,21 @@ int anetUnixServer(char *err, char *path, mode_t perm, int backlog)
         chmod(sa.sun_path, perm);
     return s;
 }
-
+/**
+ * 接收一个监听 socket 的文件描述符 s,
+ * 从 s 的等待连接队列中取出第一个连接，
+ * 创建一个与 s 同类的新的 socket，
+ * 并返回文件描述符
+ */
 static int anetGenericAccept(char *err, int s, struct sockaddr *sa, socklen_t *len) {
     int fd;
     while(1) {
+        /*
+         * SOCKET accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
+         * sockfd:套接字描述符，该套接字在 listen() 后监听连接
+         * addr:(可选)指针，指向一个缓冲区，接收客户端连接实体的地址
+         * addrlen:(可选)指针，输入参数，表示 addr 所指向缓冲区的大小
+         */
         fd = accept(s,sa,len);
         if (fd == -1) {
             if (errno == EINTR)
@@ -581,6 +614,10 @@ static int anetGenericAccept(char *err, int s, struct sockaddr *sa, socklen_t *l
     return fd;
 }
 
+
+/**
+ * TCP 连接 accept 函数
+ */
 int anetTcpAccept(char *err, int s, char *ip, size_t ip_len, int *port) {
     int fd;
     struct sockaddr_storage sa;

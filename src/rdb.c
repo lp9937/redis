@@ -1211,10 +1211,19 @@ ssize_t rdbSaveSingleModuleAux(rio *rdb, int when, moduleType *mt) {
  * Redis I/O channel. On success C_OK is returned, otherwise C_ERR
  * is returned and part of the output, or all the output, can be
  * missing because of I/O errors.
- *
+ * 
+ * 产生一个 RDB 格式的数据库 dump 文件，并发送这个文件到指定的 Redis I/O 通道
+ * 如果成功，则返回 C_OK
+ * 否则返回 C_ERR
+ * 部分输出或所有输出可能因为 I/O 错误而丢失
+ * 
  * When the function returns C_ERR and if 'error' is not NULL, the
  * integer pointed by 'error' is set to the value of errno just after the I/O
- * error. */
+ * error. 
+ * 
+ * 当函数返回 C_ERR，且 ‘error’ 参数不为 NULL时，如果发生的是 
+ * I/O 错误，整数指针 error 被设置成 errno 的值。
+ * */
 int rdbSaveRio(rio *rdb, int *error, int rdbflags, rdbSaveInfo *rsi) {
     dictIterator *di = NULL;
     dictEntry *de;
@@ -1349,6 +1358,10 @@ werr: /* Write error. */
 }
 
 /* Save the DB on disk. Return C_ERR on error, C_OK on success. */
+/**
+ * 将数据库保存在磁盘上
+ * 保存成功返回 REDIS_OK，出错/失败返回 REDIS_ERR。
+ */
 int rdbSave(char *filename, rdbSaveInfo *rsi) {
     char tmpfile[256];
     char cwd[MAXPATHLEN]; /* Current working dir path for error messages. */
@@ -1356,9 +1369,14 @@ int rdbSave(char *filename, rdbSaveInfo *rsi) {
     rio rdb;
     int error = 0;
 
+    // getpid() 取得进程识别码，创建临时文件
     snprintf(tmpfile,256,"temp-%d.rdb", (int) getpid());
+    // 打开只写文件，若文件存在则文件长度清为零，即该文件内容会消失；
+    // 若文件不存在则创建该文件
     fp = fopen(tmpfile,"w");
     if (!fp) {
+        // 将当前工作目录的绝对路径复制到参数 buffer
+        // 所指的内存空间中
         char *cwdp = getcwd(cwd,MAXPATHLEN);
         serverLog(LL_WARNING,
             "Failed opening the RDB file %s (in server root dir %s) "
@@ -1369,9 +1387,11 @@ int rdbSave(char *filename, rdbSaveInfo *rsi) {
         return C_ERR;
     }
 
+    // 初始化 I/O
     rioInitWithFile(&rdb,fp);
+    // 开始保存
     startSaving(RDBFLAGS_NONE);
-
+    // 当 rdb 保存的时候，增加 fsync
     if (server.rdb_save_incremental_fsync)
         rioSetAutoSync(&rdb,REDIS_AUTOSYNC_BYTES);
 
@@ -1381,6 +1401,7 @@ int rdbSave(char *filename, rdbSaveInfo *rsi) {
     }
 
     /* Make sure data will not remain on the OS's output buffers */
+    // 确保数据不会保留在操作系统的输出缓冲区中
     if (fflush(fp)) goto werr;
     if (fsync(fileno(fp))) goto werr;
     if (fclose(fp)) { fp = NULL; goto werr; }
@@ -1388,6 +1409,9 @@ int rdbSave(char *filename, rdbSaveInfo *rsi) {
     
     /* Use RENAME to make sure the DB file is changed atomically only
      * if the generate DB file is ok. */
+    /**
+     * 使用 RENAME ，原子性地对临时文件进行改名，覆盖原来的 RDB 文件。
+     */
     if (rename(tmpfile,filename) == -1) {
         char *cwdp = getcwd(cwd,MAXPATHLEN);
         serverLog(LL_WARNING,
@@ -2293,6 +2317,7 @@ void stopLoading(int success) {
 
 void startSaving(int rdbflags) {
     /* Fire the persistence modules end event. */
+    // 触发持久化模块结束事件
     int subevent;
     if (rdbflags & RDBFLAGS_AOF_PREAMBLE)
         subevent = REDISMODULE_SUBEVENT_PERSISTENCE_AOF_START;
@@ -2853,13 +2878,19 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
     return C_OK; /* Unreached. */
 }
 
+/**
+ * RDB 保存命令
+ */
 void saveCommand(client *c) {
+    // BGSAVE 已经在执行中，不能再执行 SAVE
+    // 否则将产生竞争条件
     if (server.child_type == CHILD_TYPE_RDB) {
         addReplyError(c,"Background save already in progress");
         return;
     }
     rdbSaveInfo rsi, *rsiptr;
     rsiptr = rdbPopulateSaveInfo(&rsi);
+    // 执行
     if (rdbSave(server.rdb_filename,rsiptr) == C_OK) {
         addReply(c,shared.ok);
     } else {
@@ -2912,7 +2943,15 @@ void bgsaveCommand(client *c) {
  * that is normally stack-allocated in the caller, returns the populated
  * pointer if the instance has a valid master client, otherwise NULL
  * is returned, and the RDB saving will not persist any replication related
- * information. */
+ * information. 
+ * 
+ * 填充 rdbSaveInfo 结构，该结构用于将复制信息保存到 RDB 文件。
+ * 当前该结构仅仅包含主库选择的 DB。
+ * 如果 rdbSave*() 类函数被调用的时候，接收 NULL 的 rdbSaveInfo 结构,
+ * 复制 ID/偏移量不会保存在 RDB 文件中。
+ * 如果实例有一个有效的主客户端，则返回被填充后的 rdbSaveInfo 结构的指针
+ * 否则返回 NULL，RDB 文件将不持久化任何复制相关的信息
+ * */
 rdbSaveInfo *rdbPopulateSaveInfo(rdbSaveInfo *rsi) {
     rdbSaveInfo rsi_init = RDB_SAVE_INFO_INIT;
     *rsi = rsi_init;
@@ -2924,18 +2963,36 @@ rdbSaveInfo *rdbPopulateSaveInfo(rdbSaveInfo *rsi) {
      * connects to us, the NULL repl_backlog will trigger a full
      * synchronization, at the same time we will use a new replid and clear
      * replid2. */
+
+    /**
+     * 如果当前实例是 master，仅仅当 repl_backlog 不为空的时候，才填充
+     * 复制信息。如果 repl_backlog 为空，表示当前实例不在任何同步链中。
+     * 当一个 slave 连接到当前实例时，NULL 的 repl_backlog 将触发全量同步，
+     * 同时我们将使用新的 replid，并清楚 replid2，因此此时的复制信息是没有用的。
+     */
     if (!server.masterhost && server.repl_backlog) {
         /* Note that when server.slaveseldb is -1, it means that this master
          * didn't apply any write commands after a full synchronization.
          * So we can let repl_stream_db be 0, this allows a restarted slave
          * to reload replication ID/offset, it's safe because the next write
          * command must generate a SELECT statement. */
+        /**
+         * 注意：当 server.slaveseldb 为 -1 的时候，
+         * 意味着 master 在完成全量同步之后没有应用任何写命令。
+         * 此时将 repl_stream_db 设置为 0，这允许重新启动的 slave
+         * 重新加载复制 ID/offset，这是安全的，因为下一个 write 
+         * 命令必须生成 SELECT 语句。
+         */
         rsi->repl_stream_db = server.slaveseldb == -1 ? 0 : server.slaveseldb;
         return rsi;
     }
 
     /* If the instance is a slave we need a connected master
      * in order to fetch the currently selected DB. */
+    /**
+     * 如果实例是一个 slave，为了获取当前选定的数据库，
+     * 需要一个被连接的 master
+     */
     if (server.master) {
         rsi->repl_stream_db = server.master->db->id;
         return rsi;
